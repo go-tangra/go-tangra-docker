@@ -1,0 +1,8 @@
+deployer:
+  # Deployer gRPC service endpoint
+  endpoint: "deployer-service:9200"
+  # Connection timeout
+  timeout: 10s
+  # TLS configuration - disabled for internal communication
+  tls:
+    enabled: false

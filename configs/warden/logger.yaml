@@ -1,0 +1,4 @@
+logger:
+  level: "debug"
+  output: "stdout"
+  format: "json"

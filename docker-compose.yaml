@@ -1,0 +1,620 @@
+# Go-Tangra Platform - Docker Compose
+# This file orchestrates the entire Go-Tangra platform stack
+#
+# Usage:
+#   docker compose up -d              # Start all services
+#   docker compose up -d --build      # Rebuild and start
+#   docker compose logs -f            # Follow logs
+#   docker compose down               # Stop all services
+#   docker compose down -v            # Stop and remove volumes
+
+networks:
+  app-tier:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  rustfs-data:
+  admin-data:
+  lcm-data:
+  lcm-certs:  # Shared volume for LCM certificates (CA + admin cert)
+  deployer-data:
+  warden-data:
+  ipam-data:
+  paperless-data:
+  vault-data:
+  vault-credentials:  # Shared volume for Vault AppRole credentials
+
+services:
+  # ===========================================
+  # Application Services
+  # ===========================================
+
+  frontend:
+    build:
+      context: ../go-tangra-frontend
+      dockerfile: Dockerfile
+    image: go-tangra/frontend:latest
+    restart: always
+    ports:
+      - "8080:8080"
+    networks:
+      - app-tier
+    environment:
+      # Nginx proxy backend configuration
+      - BACKEND_HOST=admin-service
+      - BACKEND_PORT=7788
+      - SSE_PORT=7789
+      # Frontend API URLs (relative paths, proxied through nginx)
+      - VITE_GLOB_API_URL=/admin
+      - VITE_GLOB_SSE_URL=/sse/events
+    volumes:
+      - ../go-tangra-frontend/nginx.conf:/etc/nginx/nginx.conf.template:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        envsubst '$${BACKEND_HOST} $${BACKEND_PORT} $${SSE_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+        /docker-entrypoint.sh nginx -g 'daemon off;'
+    depends_on:
+      admin-service:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+  # Init container to seed database with default data
+  # NOTE: This runs AFTER admin-service creates the schema
+  db-init:
+    image: docker.io/timescale/timescaledb:latest-pg15
+    restart: "no"
+    networks:
+      - app-tier
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD:-*Abcd123456}
+    volumes:
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for database and schema to be ready..."
+
+        # Wait for postgres to be ready
+        until pg_isready -h postgres -U postgres; do
+          echo "Database not ready, waiting..."
+          sleep 2
+        done
+
+        # Wait for admin-service to create the sys_menus table (schema migration)
+        echo "Waiting for sys_menus table to be created by admin-service..."
+        RETRY=0
+        MAX_RETRIES=60
+        while [ $$RETRY -lt $$MAX_RETRIES ]; do
+          if psql -h postgres -U postgres -d gwa -c "SELECT 1 FROM sys_menus LIMIT 1;" >/dev/null 2>&1; then
+            echo "Schema is ready!"
+            break
+          fi
+          RETRY=$$((RETRY + 1))
+          echo "Schema not ready yet, waiting... ($$RETRY/$$MAX_RETRIES)"
+          sleep 3
+        done
+
+        if [ $$RETRY -eq $$MAX_RETRIES ]; then
+          echo "Timeout waiting for schema. Admin-service may not be running."
+          exit 1
+        fi
+
+        # Check if menus table has data (indicator that seed was already run)
+        COUNT=$$(psql -h postgres -U postgres -d gwa -t -c "SELECT COUNT(*) FROM sys_menus;" 2>/dev/null | tr -d ' ')
+
+        if [ "$$COUNT" = "0" ] || [ -z "$$COUNT" ]; then
+          echo "Seeding database with default data..."
+          if psql -h postgres -U postgres -d gwa -f /sql/postgresql-default-data.sql; then
+            echo "Database seeded successfully!"
+          else
+            echo "ERROR: Database seeding failed!"
+            exit 1
+          fi
+        else
+          echo "Database already has $$COUNT menu records, skipping seed."
+        fi
+        exit 0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Init container to wait for LCM to generate certificates
+  lcm-init:
+    build:
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+    image: go-tangra/lcm-service:latest
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+    volumes:
+      - ./configs/lcm:/app/configs:ro
+      - lcm-data:/app/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for LCM to generate certificates..."
+        counter=0
+        while [ $$counter -lt 120 ]; do
+          # Wait for all required certificates: CA, admin, deployer client certs AND server certs for all modules
+          if [ -f /app/data/admin/admin.crt ] && \
+             [ -f /app/data/ca/ca.crt ] && \
+             [ -f /app/data/deployer/deployer.crt ] && \
+             [ -f /app/data/warden-server/server.crt ] && \
+             [ -f /app/data/ipam-server/server.crt ] && \
+             [ -f /app/data/paperless-server/server.crt ] && \
+             [ -f /app/data/deployer-server/server.crt ]; then
+            echo "All certificates found!"
+            # Set permissions on certificate directories
+            chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer
+            chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server
+            chmod 644 /app/data/ca/*.crt /app/data/admin/*.crt /app/data/deployer/*.crt
+            chmod 644 /app/data/warden-server/*.crt /app/data/ipam-server/*.crt /app/data/paperless-server/*.crt /app/data/deployer-server/*.crt
+            chmod 600 /app/data/admin/*.key /app/data/deployer/*.key
+            chmod 600 /app/data/warden-server/*.key /app/data/ipam-server/*.key /app/data/paperless-server/*.key /app/data/deployer-server/*.key
+            echo "Certificate permissions set"
+            echo "Certificates ready:"
+            echo "  - CA: /app/data/ca/ca.crt"
+            echo "  - Admin client: /app/data/admin/admin.crt"
+            echo "  - Deployer client: /app/data/deployer/deployer.crt"
+            echo "  - Warden server: /app/data/warden-server/server.crt"
+            echo "  - IPAM server: /app/data/ipam-server/server.crt"
+            echo "  - Paperless server: /app/data/paperless-server/server.crt"
+            echo "  - Deployer server: /app/data/deployer-server/server.crt"
+            exit 0
+          fi
+          counter=$$((counter + 1))
+          echo "Waiting for certificates... ($$counter/120)"
+          sleep 2
+        done
+        echo "Timeout waiting for certificates"
+        exit 1
+    depends_on:
+      lcm-service:
+        condition: service_started
+
+  # Init container to bootstrap Vault AppRole for Warden
+  vault-init:
+    image: hashicorp/vault:1.15
+    restart: "no"
+    networks:
+      - app-tier
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_DEV_TOKEN:-dev-token}
+    volumes:
+      - vault-credentials:/vault-credentials
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Initializing Vault at $${VAULT_ADDR}..."
+
+        # Wait for Vault to be ready
+        MAX_RETRIES=60
+        RETRY=0
+        until vault status >/dev/null 2>&1; do
+            RETRY=$$((RETRY + 1))
+            if [ $$RETRY -ge $$MAX_RETRIES ]; then
+                echo "ERROR: Vault not ready after $${MAX_RETRIES} attempts"
+                exit 1
+            fi
+            echo "Waiting for Vault... ($${RETRY}/$${MAX_RETRIES})"
+            sleep 2
+        done
+        echo "Vault is ready!"
+
+        # Enable KV v2 secrets engine
+        echo "Enabling KV v2 secrets engine..."
+        vault secrets enable -path=secret -version=2 kv 2>/dev/null || echo "KV secrets engine already enabled"
+
+        # Create policy for Warden service
+        echo "Creating Warden policy..."
+        vault policy write warden - <<'POLICY'
+        path "secret/data/warden/*" {
+          capabilities = ["create", "read", "update", "delete", "list"]
+        }
+        path "secret/metadata/warden/*" {
+          capabilities = ["read", "delete", "list"]
+        }
+        path "secret/destroy/warden/*" {
+          capabilities = ["update"]
+        }
+        path "secret/undelete/warden/*" {
+          capabilities = ["update"]
+        }
+        POLICY
+
+        # Enable AppRole authentication
+        echo "Enabling AppRole authentication..."
+        vault auth enable approle 2>/dev/null || echo "AppRole auth already enabled"
+
+        # Create AppRole for Warden
+        echo "Creating Warden AppRole..."
+        vault write auth/approle/role/warden \
+            token_policies="warden" \
+            token_ttl=1h \
+            token_max_ttl=4h \
+            secret_id_ttl=0 \
+            secret_id_num_uses=0
+
+        # Get credentials
+        ROLE_ID=$$(vault read -field=role_id auth/approle/role/warden/role-id)
+        SECRET_ID=$$(vault write -field=secret_id -force auth/approle/role/warden/secret-id)
+
+        # Save to shared volume (warden runs as uid 1000)
+        mkdir -p /vault-credentials
+        printf '%s' "$$ROLE_ID" > /vault-credentials/role_id
+        printf '%s' "$$SECRET_ID" > /vault-credentials/secret_id
+        chmod 644 /vault-credentials/role_id /vault-credentials/secret_id
+        chown 1000:1000 /vault-credentials/role_id /vault-credentials/secret_id 2>/dev/null || true
+
+        echo "============================================"
+        echo "Vault initialization complete!"
+        echo "ROLE_ID=$$ROLE_ID"
+        echo "SECRET_ID=$$SECRET_ID"
+        echo "============================================"
+    depends_on:
+      vault:
+        condition: service_healthy
+
+  admin-service:
+    build:
+      context: ../go-tangra-portal
+      dockerfile: app/admin/service/Dockerfile
+    image: go-tangra/admin-service:latest
+    restart: always
+    ports:
+      - "7788:7788"
+      - "7789:7789"
+      - "7787:7787"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      # LCM service uses mTLS
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - LCM_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - LCM_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - LCM_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - LCM_SERVER_NAME=lcm-server
+      # Deployer service - uses mTLS with proper server certificates
+      - DEPLOYER_GRPC_ENDPOINT=deployer-service:9200
+      - DEPLOYER_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - DEPLOYER_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - DEPLOYER_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - DEPLOYER_SERVER_NAME=deployer-service
+      # Warden service - uses mTLS with proper server certificates
+      - WARDEN_GRPC_ENDPOINT=warden-service:9300
+      - WARDEN_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - WARDEN_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - WARDEN_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - WARDEN_SERVER_NAME=warden-service
+      # IPAM service - uses mTLS with proper server certificates
+      - IPAM_GRPC_ENDPOINT=ipam-service:9400
+      - IPAM_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - IPAM_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - IPAM_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - IPAM_SERVER_NAME=ipam-service
+      # Paperless service - uses mTLS with proper server certificates
+      - PAPERLESS_GRPC_ENDPOINT=paperless-service:9500
+      - PAPERLESS_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - PAPERLESS_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - PAPERLESS_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - PAPERLESS_SERVER_NAME=paperless-service
+    volumes:
+      - ./configs/admin:/app/configs:ro
+      - admin-data:/app/data
+      - lcm-data:/app/lcm-certs:ro  # Mount LCM data for certificates
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7788/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+
+  lcm-service:
+    build:
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+    image: go-tangra/lcm-service:latest
+    restart: always
+    ports:
+      - "8000:8000"
+      - "9100:9100"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=lcm-service:9100
+    volumes:
+      - ./configs/lcm:/app/configs:ro
+      - lcm-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  deployer-service:
+    build:
+      context: ../go-tangra-deployer
+      dockerfile: Dockerfile
+    image: go-tangra/deployer-service:latest
+    restart: always
+    ports:
+      - "9200:9200"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - LCM_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - LCM_CLIENT_CERT_PATH=/app/lcm-certs/deployer/deployer.crt
+      - LCM_CLIENT_KEY_PATH=/app/lcm-certs/deployer/deployer.key
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=deployer-service:9200
+      # mTLS server certificate configuration (using LCM-generated certificates)
+      - DEPLOYER_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - DEPLOYER_SERVER_CERT_PATH=/app/lcm-certs/deployer-server/server.crt
+      - DEPLOYER_SERVER_KEY_PATH=/app/lcm-certs/deployer-server/server.key
+    volumes:
+      - ./configs/deployer:/app/configs:ro
+      - deployer-data:/app/data
+      - lcm-data:/app/lcm-certs:ro  # Mount LCM data for mTLS certificates (client + server certs)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  warden-service:
+    build:
+      context: ../go-tangra-warden
+      dockerfile: Dockerfile
+    image: go-tangra/warden-service:latest
+    restart: always
+    ports:
+      - "9300:9300"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_ROLE_ID_FILE=/vault-credentials/role_id
+      - VAULT_SECRET_ID_FILE=/vault-credentials/secret_id
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=warden-service:9300
+      # mTLS server certificate configuration (using LCM-generated certificates)
+      - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - WARDEN_SERVER_CERT_PATH=/app/certs/warden-server/server.crt
+      - WARDEN_SERVER_KEY_PATH=/app/certs/warden-server/server.key
+    volumes:
+      - ./configs/warden:/app/configs:ro
+      - vault-credentials:/vault-credentials:ro
+      - lcm-data:/app/certs:ro  # Mount LCM data for server certificates
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  ipam-service:
+    build:
+      context: ../go-tangra-ipam
+      dockerfile: Dockerfile
+    image: go-tangra/ipam-service:latest
+    restart: always
+    ports:
+      - "9400:9400"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=ipam-service:9400
+      # mTLS server certificate configuration (using LCM-generated certificates)
+      - IPAM_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - IPAM_SERVER_CERT_PATH=/app/certs/ipam-server/server.crt
+      - IPAM_SERVER_KEY_PATH=/app/certs/ipam-server/server.key
+    volumes:
+      - ./configs/ipam:/app/configs:ro
+      - ipam-data:/app/data
+      - lcm-data:/app/certs:ro  # Mount LCM data for server certificates
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  paperless-service:
+    build:
+      context: ../go-tangra-paperless
+      dockerfile: Dockerfile
+    image: go-tangra/paperless-service:latest
+    restart: always
+    ports:
+      - "9500:9500"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=paperless-service:9500
+      # S3-compatible storage (rustfs)
+      - PAPERLESS_S3_ENDPOINT=rustfs:9000
+      - PAPERLESS_S3_ACCESS_KEY=rustfsadmin
+      - PAPERLESS_S3_SECRET_KEY=rustfsadmin
+      - PAPERLESS_S3_BUCKET=paperless
+      - PAPERLESS_S3_USE_SSL=false
+      # Document processing services
+      - PAPERLESS_TIKA_ENDPOINT=http://tika:9998
+      - PAPERLESS_GOTENBERG_ENDPOINT=http://gotenberg:3000
+      # mTLS server certificate configuration (using LCM-generated certificates)
+      - PAPERLESS_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - PAPERLESS_SERVER_CERT_PATH=/app/certs/paperless-server/server.crt
+      - PAPERLESS_SERVER_KEY_PATH=/app/certs/paperless-server/server.key
+    volumes:
+      - ./configs/paperless:/app/configs:ro
+      - paperless-data:/app/data
+      - lcm-data:/app/certs:ro  # Mount LCM data for server certificates
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      tika:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  # ===========================================
+  # Infrastructure Services
+  # ===========================================
+
+  vault:
+    image: hashicorp/vault:1.15
+    restart: always
+    ports:
+      - "8200:8200"
+    networks:
+      - app-tier
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_TOKEN:-dev-token}
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: docker.io/timescale/timescaledb:latest-pg15
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - app-tier
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-*Abcd123456}
+      - POSTGRES_DB=${POSTGRES_DB:-gwa}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: docker.io/bitnami/redis:latest
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - app-tier
+    environment:
+      - ALLOW_EMPTY_PASSWORD=no
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-*Abcd123456}
+      - REDIS_AOF_ENABLED=no
+      - REDIS_IO_THREADS_DO_READS=yes
+      - REDIS_DISABLE_COMMANDS=FLUSHDB,FLUSHALL,CONFIG
+    volumes:
+      - redis-data:/bitnami/redis/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-*Abcd123456}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  tika:
+    image: apache/tika:latest
+    restart: always
+    ports:
+      - "9998:9998"
+    networks:
+      - app-tier
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9998'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: always
+    ports:
+      - "3000:3000"
+    networks:
+      - app-tier
+    command:
+      - "gotenberg"
+      - "--api-timeout=120s"
+      - "--api-root-path=/"
+      - "--log-level=info"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - app-tier
+    environment:
+      - RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY:-rustfsadmin}
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY:-rustfsadmin}
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CONSOLE_ADDRESS=:9001
+      - RUSTFS_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+    volumes:
+      - rustfs-data:/data

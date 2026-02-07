@@ -1,0 +1,9 @@
+oss:
+  minio:
+    endpoint: "rustfs:9000"
+    upload_host: "rustfs:9000"
+    download_host: "http://localhost:9000"
+    access_key: "rustfsadmin"
+    secret_key: "*rustfsadmin"
+    token: ""
+    use_ssl: false

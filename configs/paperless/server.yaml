@@ -1,0 +1,41 @@
+server:
+  grpc:
+    addr: "0.0.0.0:9500"
+    timeout: 30s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+
+data:
+  database:
+    driver: postgres
+    source: postgresql://postgres:*Abcd123456@postgres:5432/gwa?sslmode=disable
+    migrate: true
+    max_idle_connections: 5
+    max_open_connections: 20
+    connection_max_lifetime: 3600s
+
+  redis:
+    network: tcp
+    addr: redis:6379
+    password: "*Abcd123456"
+    read_timeout: 1s
+    write_timeout: 1s
+
+  storage:
+    endpoint: rustfs:9000
+    bucket: paperless
+    access_key: rustfsadmin
+    secret_key: rustfsadmin
+    use_ssl: false
+
+registration:
+  admin_endpoint: admin-service:7787
+  module_id: paperless
+  module_name: Document Management
+  heartbeat_interval: 30s
+  retry_interval: 5s
+  max_retries: 10

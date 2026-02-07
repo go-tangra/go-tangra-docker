@@ -1,0 +1,20 @@
+deployer:
+  data_dir: "./data"
+
+  events:
+    enabled: true
+    topic_prefix: "lcm"
+    subscribe_events:
+      - "certificate.issued"
+      - "renewal.completed"
+
+  jobs:
+    worker_count: 5
+    max_retries: 3
+    retry_delay_seconds: 60
+    retry_backoff_multiplier: 2.0
+    job_timeout_seconds: 300
+    cleanup_days: 30
+
+  encryption:
+    key: "deployer-32-byte-encrypt-key!!" # Must be 32 bytes for AES-256
