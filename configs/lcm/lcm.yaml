@@ -31,7 +31,7 @@ frontend_certificate:
   acme_email: "admin@verax.net"
   dns_provider: "gcloud"
   dns_provider_config:
-    project: "cars-bg"
+    project: "PROJECT-ID"
     serviceAccountFile: "/app/configs/gcp-dns-sa.json"
     dnsPropagationTimeout: "120"
     dnsTTL: "300"
@@ -39,3 +39,6 @@ frontend_certificate:
   key_size: 256
   output_dir: "frontend"
   renew_before_days: 30
+  dns_resolvers:
+    - "1.1.1.1:53"
+    - "8.8.8.8:53"
