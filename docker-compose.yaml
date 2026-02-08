@@ -35,7 +35,8 @@ services:
     image: ghcr.io/go-tangra/go-tangra-frontend:latest
     restart: always
     ports:
-      - "8080:8080"
+      - "80:80"
+      - "443:443"
     networks:
       - app-tier
     environment:
@@ -46,10 +47,18 @@ services:
       # Frontend API URLs (relative paths, proxied through nginx)
       - VITE_GLOB_API_URL=/admin
       - VITE_GLOB_SSE_URL=/sse/events
+      # SSL configuration
+      - SSL_CERT_PATH=/app/certs/frontend/server.crt
+      - SSL_KEY_PATH=/app/certs/frontend/server.key
+      - SERVER_NAME=portal.infra.verax.net
+    volumes:
+      - lcm-data:/app/certs:ro    # Mount LCM data for frontend cert
     depends_on:
       admin-service:
         condition: service_healthy
       db-init:
+        condition: service_completed_successfully
+      lcm-init:
         condition: service_completed_successfully
 
   # Init container to seed database with default data
@@ -136,7 +145,7 @@ services:
              [ -f /app/data/ipam-server/server.crt ] && \
              [ -f /app/data/paperless-server/server.crt ] && \
              [ -f /app/data/deployer-server/server.crt ]; then
-            echo "All certificates found!"
+            echo "All internal certificates found!"
             # Set permissions on certificate directories
             chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer
             chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server
@@ -153,6 +162,31 @@ services:
             echo "  - IPAM server: /app/data/ipam-server/server.crt"
             echo "  - Paperless server: /app/data/paperless-server/server.crt"
             echo "  - Deployer server: /app/data/deployer-server/server.crt"
+
+            # Wait for optional frontend ACME certificate (DNS-01 can be slow)
+            echo "Waiting for frontend ACME certificate (optional, up to 180s)..."
+            fe_counter=0
+            while [ $$fe_counter -lt 90 ]; do
+              if [ -f /app/data/frontend/server.crt ] && \
+                 [ -f /app/data/frontend/server.key ]; then
+                echo "Frontend certificate found!"
+                chmod -R 755 /app/data/frontend
+                chmod 644 /app/data/frontend/server.crt
+                chmod 600 /app/data/frontend/server.key
+                if [ -f /app/data/frontend/ca.crt ]; then
+                  chmod 644 /app/data/frontend/ca.crt
+                fi
+                echo "  - Frontend cert: /app/data/frontend/server.crt"
+                break
+              fi
+              fe_counter=$$((fe_counter + 1))
+              echo "Waiting for frontend certificate... ($$fe_counter/90)"
+              sleep 2
+            done
+            if [ $$fe_counter -eq 90 ]; then
+              echo "Frontend certificate not available (non-fatal, frontend will run HTTP only)"
+            fi
+
             exit 0
           fi
           counter=$$((counter + 1))

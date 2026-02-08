@@ -49,13 +49,6 @@ services:
       # Frontend API URLs (relative paths, proxied through nginx)
       - VITE_GLOB_API_URL=/admin
       - VITE_GLOB_SSE_URL=/sse/events
-    volumes:
-      - ../go-tangra-frontend/nginx.conf:/etc/nginx/nginx.conf.template:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        envsubst '$${BACKEND_HOST} $${BACKEND_PORT} $${SSE_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
-        /docker-entrypoint.sh nginx -g 'daemon off;'
     depends_on:
       admin-service:
         condition: service_healthy

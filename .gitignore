@@ -23,3 +23,6 @@ data/
 # Temporary files
 tmp/
 temp/
+
+# GCP service account keys
+configs/lcm/gcp-dns-sa.json

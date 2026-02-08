@@ -22,3 +22,20 @@ webhooks:
     initial_delay_ms: 1000
     max_delay_ms: 60000
     backoff_multiplier: 2.0
+
+# Frontend ACME certificate configuration (Let's Encrypt via DNS-01)
+frontend_certificate:
+  enabled: true
+  domain: "portal.infra.verax.net"
+  acme_endpoint: "https://acme-v02.api.letsencrypt.org/directory"
+  acme_email: "admin@verax.net"
+  dns_provider: "gcloud"
+  dns_provider_config:
+    project: "cars-bg"
+    serviceAccountFile: "/app/configs/gcp-dns-sa.json"
+    dnsPropagationTimeout: "120"
+    dnsTTL: "300"
+  key_type: "ec"
+  key_size: 256
+  output_dir: "frontend"
+  renew_before_days: 30
