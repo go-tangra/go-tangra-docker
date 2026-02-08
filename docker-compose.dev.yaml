@@ -1,9 +1,9 @@
-# Go-Tangra Platform - Docker Compose (Production)
-# Pulls pre-built images from GitHub Container Registry (GHCR)
+# Go-Tangra Platform - Docker Compose
+# This file orchestrates the entire Go-Tangra platform stack
 #
 # Usage:
 #   docker compose up -d              # Start all services
-#   docker compose pull               # Pull latest images
+#   docker compose up -d --build      # Rebuild and start
 #   docker compose logs -f            # Follow logs
 #   docker compose down               # Stop all services
 #   docker compose down -v            # Stop and remove volumes
@@ -32,7 +32,10 @@ services:
   # ===========================================
 
   frontend:
-    image: ghcr.io/go-tangra/go-tangra-frontend:latest
+    build:
+      context: ../go-tangra-frontend
+      dockerfile: Dockerfile
+    image: go-tangra/frontend:latest
     restart: always
     ports:
       - "8080:8080"
@@ -46,6 +49,13 @@ services:
       # Frontend API URLs (relative paths, proxied through nginx)
       - VITE_GLOB_API_URL=/admin
       - VITE_GLOB_SSE_URL=/sse/events
+    volumes:
+      - ../go-tangra-frontend/nginx.conf:/etc/nginx/nginx.conf.template:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        envsubst '$${BACKEND_HOST} $${BACKEND_PORT} $${SSE_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+        /docker-entrypoint.sh nginx -g 'daemon off;'
     depends_on:
       admin-service:
         condition: service_healthy
@@ -114,7 +124,10 @@ services:
 
   # Init container to wait for LCM to generate certificates
   lcm-init:
-    image: ghcr.io/go-tangra/go-tangra-lcm:latest
+    build:
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+    image: go-tangra/lcm-service:latest
     networks:
       - app-tier
     environment:
@@ -251,7 +264,10 @@ services:
         condition: service_healthy
 
   admin-service:
-    image: ghcr.io/go-tangra/go-tangra-portal:latest
+    build:
+      context: ../go-tangra-portal
+      dockerfile: app/admin/service/Dockerfile
+    image: go-tangra/admin-service:latest
     restart: always
     ports:
       - "7788:7788"
@@ -310,7 +326,10 @@ services:
         condition: service_completed_successfully
 
   lcm-service:
-    image: ghcr.io/go-tangra/go-tangra-lcm:latest
+    build:
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+    image: go-tangra/lcm-service:latest
     restart: always
     ports:
       - "8000:8000"
@@ -331,7 +350,10 @@ services:
         condition: service_healthy
 
   deployer-service:
-    image: ghcr.io/go-tangra/go-tangra-deployer:latest
+    build:
+      context: ../go-tangra-deployer
+      dockerfile: Dockerfile
+    image: go-tangra/deployer-service:latest
     restart: always
     ports:
       - "9200:9200"
@@ -364,7 +386,10 @@ services:
         condition: service_healthy
 
   warden-service:
-    image: ghcr.io/go-tangra/go-tangra-warden:latest
+    build:
+      context: ../go-tangra-warden
+      dockerfile: Dockerfile
+    image: go-tangra/warden-service:latest
     restart: always
     ports:
       - "9300:9300"
@@ -398,7 +423,10 @@ services:
         condition: service_healthy
 
   ipam-service:
-    image: ghcr.io/go-tangra/go-tangra-ipam:latest
+    build:
+      context: ../go-tangra-ipam
+      dockerfile: Dockerfile
+    image: go-tangra/ipam-service:latest
     restart: always
     ports:
       - "9400:9400"
@@ -427,7 +455,10 @@ services:
         condition: service_healthy
 
   paperless-service:
-    image: ghcr.io/go-tangra/go-tangra-paperless:latest
+    build:
+      context: ../go-tangra-paperless
+      dockerfile: Dockerfile
+    image: go-tangra/paperless-service:latest
     restart: always
     ports:
       - "9500:9500"

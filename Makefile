@@ -1,18 +1,21 @@
-.PHONY: help up down build rebuild logs ps clean pull generate-api ts
+.PHONY: help up down build rebuild logs ps clean pull dev dev-build dev-down generate-api ts
 
 # Default target
 help:
 	@echo "Go-Tangra Platform Docker Commands"
 	@echo ""
-	@echo "Usage:"
+	@echo "Production (pulls pre-built images from GHCR):"
 	@echo "  make up        - Start all services"
 	@echo "  make down      - Stop all services"
-	@echo "  make build     - Build all images"
-	@echo "  make rebuild   - Rebuild and restart all services"
+	@echo "  make pull      - Pull latest images from GHCR"
 	@echo "  make logs      - Follow all logs"
 	@echo "  make ps        - Show running services"
 	@echo "  make clean     - Stop services and remove volumes"
-	@echo "  make pull      - Pull latest base images"
+	@echo ""
+	@echo "Development (builds from local source):"
+	@echo "  make dev       - Start all services (build from source)"
+	@echo "  make dev-build - Rebuild and restart all services"
+	@echo "  make dev-down  - Stop all dev services"
 	@echo ""
 	@echo "API Generation:"
 	@echo "  make ts            - Generate TypeScript API for frontend"
@@ -33,6 +36,10 @@ help:
 	@echo "  make restart-ipam      - Restart ipam-service"
 	@echo "  make restart-paperless - Restart paperless-service"
 
+# ===========================================
+# Production (GHCR images)
+# ===========================================
+
 # Start all services
 up:
 	docker compose up -d
@@ -41,13 +48,35 @@ up:
 down:
 	docker compose down
 
-# Build all images
-build:
-	docker compose build
+# Pull latest images
+pull:
+	docker compose pull
+
+# Stop and remove volumes
+clean:
+	docker compose down -v
+
+# ===========================================
+# Development (build from source)
+# ===========================================
+
+DEV_COMPOSE = docker compose -f docker-compose.dev.yaml
+
+# Start all services (build from source)
+dev:
+	$(DEV_COMPOSE) up -d
 
 # Rebuild and restart
-rebuild:
-	docker compose up -d --build
+dev-build:
+	$(DEV_COMPOSE) up -d --build
+
+# Stop all dev services
+dev-down:
+	$(DEV_COMPOSE) down
+
+# Clean dev environment
+dev-clean:
+	$(DEV_COMPOSE) down -v
 
 # Follow logs
 logs:
@@ -56,14 +85,6 @@ logs:
 # Show running services
 ps:
 	docker compose ps
-
-# Stop and remove volumes
-clean:
-	docker compose down -v
-
-# Pull latest images
-pull:
-	docker compose pull
 
 # Service-specific logs
 logs-admin:

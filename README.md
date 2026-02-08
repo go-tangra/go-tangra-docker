@@ -43,9 +43,16 @@ Docker Compose configuration for running the entire Go-Tangra platform stack.
    ```
 
 3. **Start the platform**:
+
+   **Production** (pulls pre-built images from GHCR):
    ```bash
-   make up
-   # Or: docker compose up -d
+   docker compose up -d
+   docker compose pull   # Pull latest images
+   ```
+
+   **Development** (builds from local source):
+   ```bash
+   docker compose -f docker-compose.dev.yaml up -d --build
    ```
 
 4. **Access the application**:
