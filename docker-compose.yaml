@@ -204,7 +204,7 @@ services:
       lcm-service:
         condition: service_started
 
-  # Init container to bootstrap Vault AppRole for Warden
+  # Init container to bootstrap Vault (init + unseal + AppRole setup)
   vault-init:
     image: hashicorp/vault:1.15
     restart: "no"
@@ -212,28 +212,63 @@ services:
       - app-tier
     environment:
       - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_DEV_TOKEN:-dev-token}
     volumes:
       - vault-credentials:/vault-credentials
+      - vault-data:/vault/data
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -e
         echo "Initializing Vault at $${VAULT_ADDR}..."
 
-        # Wait for Vault to be ready
+        # Wait for Vault to be reachable (may be uninitialized/sealed)
         MAX_RETRIES=60
         RETRY=0
-        until vault status >/dev/null 2>&1; do
+        until vault status -format=json 2>/dev/null || vault status 2>&1 | grep -qE 'Sealed|initialized'; do
             RETRY=$$((RETRY + 1))
             if [ $$RETRY -ge $$MAX_RETRIES ]; then
-                echo "ERROR: Vault not ready after $${MAX_RETRIES} attempts"
+                echo "ERROR: Vault not reachable after $${MAX_RETRIES} attempts"
                 exit 1
             fi
             echo "Waiting for Vault... ($${RETRY}/$${MAX_RETRIES})"
             sleep 2
         done
-        echo "Vault is ready!"
+        echo "Vault is reachable!"
+
+        # Check if Vault needs initialization
+        INIT_STATUS=$$(vault status -format=json 2>/dev/null | grep '"initialized"' | grep -o 'true\|false' || echo "false")
+        if [ "$$INIT_STATUS" = "false" ]; then
+            echo "Vault not initialized, initializing with 1 key share..."
+            vault operator init -key-shares=1 -key-threshold=1 -format=json > /vault-credentials/init.json
+            echo "Vault initialized!"
+        else
+            echo "Vault already initialized"
+        fi
+
+        # Load unseal key and root token from init output
+        if [ -f /vault-credentials/init.json ]; then
+            UNSEAL_KEY=$$(cat /vault-credentials/init.json | grep -o '"unseal_keys_b64":\[\"[^"]*\"' | sed 's/.*\["//' | sed 's/".*//')
+            ROOT_TOKEN=$$(cat /vault-credentials/init.json | grep -o '"root_token":"[^"]*"' | sed 's/"root_token":"//' | sed 's/".*//')
+        else
+            echo "ERROR: No init.json found. Vault was initialized externally."
+            exit 1
+        fi
+
+        # Unseal if sealed
+        SEALED=$$(vault status -format=json 2>/dev/null | grep '"sealed"' | grep -o 'true\|false' || echo "true")
+        if [ "$$SEALED" = "true" ]; then
+            echo "Unsealing Vault..."
+            vault operator unseal "$$UNSEAL_KEY"
+            echo "Vault unsealed!"
+        else
+            echo "Vault already unsealed"
+        fi
+
+        # Authenticate with root token
+        export VAULT_TOKEN="$$ROOT_TOKEN"
+
+        # Wait for Vault to be fully ready after unseal
+        sleep 2
 
         # Enable KV v2 secrets engine
         echo "Enabling KV v2 secrets engine..."
@@ -287,7 +322,7 @@ services:
         echo "============================================"
     depends_on:
       vault:
-        condition: service_healthy
+        condition: service_started
 
   admin-service:
     image: ghcr.io/go-tangra/go-tangra-portal:latest
@@ -577,19 +612,19 @@ services:
     networks:
       - app-tier
     environment:
-      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_DEV_TOKEN:-dev-token}
-      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
       - VAULT_ADDR=http://127.0.0.1:8200
     cap_add:
       - IPC_LOCK
     volumes:
       - vault-data:/vault/data
+      - ./configs/vault:/vault/config:ro
+    command: vault server -config=/vault/config/config.hcl
     healthcheck:
-      test: ["CMD", "vault", "status"]
+      test: ["CMD", "sh", "-c", "vault status -format=json 2>/dev/null | grep -q '\"sealed\":false' || vault status 2>&1 | grep -q 'Sealed.*false'"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 15s
 
   postgres:
     image: docker.io/timescale/timescaledb:latest-pg15
