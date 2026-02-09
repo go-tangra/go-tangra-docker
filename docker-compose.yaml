@@ -618,7 +618,11 @@ services:
     volumes:
       - vault-data:/vault/data
       - ./configs/vault:/vault/config:ro
-    command: vault server -config=/vault/config/config.hcl
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        chown -R vault:vault /vault/data
+        su-exec vault vault server -config=/vault/config/config.hcl
     healthcheck:
       test: ["CMD", "sh", "-c", "vault status -format=json 2>/dev/null | grep -q '\"sealed\":false' || vault status 2>&1 | grep -q 'Sealed.*false'"]
       interval: 10s
