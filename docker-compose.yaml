@@ -142,27 +142,31 @@ services:
           if [ -f /app/data/admin/admin.crt ] && \
              [ -f /app/data/ca/ca.crt ] && \
              [ -f /app/data/deployer/deployer.crt ] && \
+             [ -f /app/data/sharing/sharing.crt ] && \
              [ -f /app/data/warden-server/server.crt ] && \
              [ -f /app/data/ipam-server/server.crt ] && \
              [ -f /app/data/paperless-server/server.crt ] && \
-             [ -f /app/data/deployer-server/server.crt ]; then
+             [ -f /app/data/deployer-server/server.crt ] && \
+             [ -f /app/data/sharing-server/server.crt ]; then
             echo "All internal certificates found!"
             # Set permissions on certificate directories
-            chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer
-            chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server
-            chmod 644 /app/data/ca/*.crt /app/data/admin/*.crt /app/data/deployer/*.crt
-            chmod 644 /app/data/warden-server/*.crt /app/data/ipam-server/*.crt /app/data/paperless-server/*.crt /app/data/deployer-server/*.crt
-            chmod 600 /app/data/admin/*.key /app/data/deployer/*.key
-            chmod 600 /app/data/warden-server/*.key /app/data/ipam-server/*.key /app/data/paperless-server/*.key /app/data/deployer-server/*.key
+            chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer /app/data/sharing
+            chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server /app/data/sharing-server
+            chmod 644 /app/data/ca/*.crt /app/data/admin/*.crt /app/data/deployer/*.crt /app/data/sharing/*.crt
+            chmod 644 /app/data/warden-server/*.crt /app/data/ipam-server/*.crt /app/data/paperless-server/*.crt /app/data/deployer-server/*.crt /app/data/sharing-server/*.crt
+            chmod 600 /app/data/admin/*.key /app/data/deployer/*.key /app/data/sharing/*.key
+            chmod 600 /app/data/warden-server/*.key /app/data/ipam-server/*.key /app/data/paperless-server/*.key /app/data/deployer-server/*.key /app/data/sharing-server/*.key
             echo "Certificate permissions set"
             echo "Certificates ready:"
             echo "  - CA: /app/data/ca/ca.crt"
             echo "  - Admin client: /app/data/admin/admin.crt"
             echo "  - Deployer client: /app/data/deployer/deployer.crt"
+            echo "  - Sharing client: /app/data/sharing/sharing.crt"
             echo "  - Warden server: /app/data/warden-server/server.crt"
             echo "  - IPAM server: /app/data/ipam-server/server.crt"
             echo "  - Paperless server: /app/data/paperless-server/server.crt"
             echo "  - Deployer server: /app/data/deployer-server/server.crt"
+            echo "  - Sharing server: /app/data/sharing-server/server.crt"
 
             # Wait for optional frontend ACME certificate (DNS-01 can be slow)
             echo "Waiting for frontend ACME certificate (optional, up to 180s)..."
@@ -326,6 +330,12 @@ services:
       - PAPERLESS_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
       - PAPERLESS_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
       - PAPERLESS_SERVER_NAME=paperless-service
+      # Sharing service - uses mTLS with proper server certificates
+      - SHARING_GRPC_ENDPOINT=sharing-service:9600
+      - SHARING_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - SHARING_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - SHARING_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - SHARING_SERVER_NAME=sharing-service
     volumes:
       - ./configs/admin:/app/configs:ro
       - admin-data:/app/data
