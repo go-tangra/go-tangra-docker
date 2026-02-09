@@ -1,0 +1,29 @@
+server:
+  grpc:
+    addr: "0.0.0.0:9600"
+    timeout: 30s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+  http:
+    addr: "0.0.0.0:9601"
+    timeout: 30s
+
+data:
+  database:
+    driver: postgres
+    source: postgresql://postgres:*Abcd123456@postgres:5432/gwa?sslmode=disable
+    migrate: true
+    max_idle_connections: 5
+    max_open_connections: 20
+    connection_max_lifetime: 3600s
+
+  redis:
+    network: tcp
+    addr: redis:6379
+    password: "*Abcd123456"
+    read_timeout: 1s
+    write_timeout: 1s
