@@ -23,6 +23,7 @@ volumes:
   warden-data:
   ipam-data:
   paperless-data:
+  sharing-data:
   vault-data:
   vault-credentials:  # Shared volume for Vault AppRole credentials
 
@@ -498,6 +499,56 @@ services:
       tika:
         condition: service_healthy
       gotenberg:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  sharing-service:
+    image: ghcr.io/go-tangra/go-tangra-sharing:latest
+    restart: always
+    ports:
+      - "9600:9600"
+      - "9601:9601"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=sharing-service:9600
+      # Upstream services for fetching content
+      - WARDEN_GRPC_ENDPOINT=warden-service:9300
+      - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - WARDEN_CLIENT_CERT_PATH=/app/certs/sharing/sharing.crt
+      - WARDEN_CLIENT_KEY_PATH=/app/certs/sharing/sharing.key
+      - WARDEN_SERVER_NAME=warden-service
+      - PAPERLESS_GRPC_ENDPOINT=paperless-service:9500
+      - PAPERLESS_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - PAPERLESS_CLIENT_CERT_PATH=/app/certs/sharing/sharing.crt
+      - PAPERLESS_CLIENT_KEY_PATH=/app/certs/sharing/sharing.key
+      - PAPERLESS_SERVER_NAME=paperless-service
+      # SMTP configuration
+      - SMTP_HOST=${SMTP_HOST:-localhost}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@example.com}
+      # Encryption and app host
+      - SHARING_ENCRYPTION_KEY=${SHARING_ENCRYPTION_KEY:-}
+      - APP_HOST=${APP_HOST:-http://localhost:5173}
+      # mTLS server certificate configuration
+      - SHARING_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - SHARING_SERVER_CERT_PATH=/app/certs/sharing-server/server.crt
+      - SHARING_SERVER_KEY_PATH=/app/certs/sharing-server/server.key
+    volumes:
+      - ./configs/sharing:/app/configs:ro
+      - sharing-data:/app/data
+      - lcm-data:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       lcm-init:
         condition: service_completed_successfully
