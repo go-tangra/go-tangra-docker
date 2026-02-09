@@ -582,6 +582,8 @@ services:
       - VAULT_ADDR=http://127.0.0.1:8200
     cap_add:
       - IPC_LOCK
+    volumes:
+      - vault-data:/vault/data
     healthcheck:
       test: ["CMD", "vault", "status"]
       interval: 10s
