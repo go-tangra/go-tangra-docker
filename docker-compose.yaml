@@ -584,6 +584,7 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME:-}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-noreply@example.com}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       # Encryption and app host
       - SHARING_ENCRYPTION_KEY=${SHARING_ENCRYPTION_KEY:-}
       - APP_HOST=${APP_HOST:-http://localhost:5173}
