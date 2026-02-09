@@ -246,10 +246,16 @@ services:
 
         # Load unseal key and root token from init output
         if [ -f /vault-credentials/init.json ]; then
-            UNSEAL_KEY=$$(cat /vault-credentials/init.json | grep -o '"unseal_keys_b64":\[\"[^"]*\"' | sed 's/.*\["//' | sed 's/".*//')
-            ROOT_TOKEN=$$(cat /vault-credentials/init.json | grep -o '"root_token":"[^"]*"' | sed 's/"root_token":"//' | sed 's/".*//')
+            UNSEAL_KEY=$$(sed -n 's/.*"unseal_keys_b64".*\[.*"\(.*\)".*/\1/p' /vault-credentials/init.json)
+            ROOT_TOKEN=$$(sed -n 's/.*"root_token".*:.*"\(.*\)".*/\1/p' /vault-credentials/init.json)
         else
             echo "ERROR: No init.json found. Vault was initialized externally."
+            exit 1
+        fi
+
+        if [ -z "$$UNSEAL_KEY" ] || [ -z "$$ROOT_TOKEN" ]; then
+            echo "ERROR: Failed to parse unseal key or root token from init.json"
+            cat /vault-credentials/init.json
             exit 1
         fi
 
