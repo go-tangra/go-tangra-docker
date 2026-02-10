@@ -406,6 +406,7 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/lcm:/app/configs:ro
       - lcm-data:/app/data
@@ -430,6 +431,7 @@ services:
       - LCM_CLIENT_KEY_PATH=/app/lcm-certs/deployer/deployer.key
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=deployer-service:9200
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # mTLS server certificate configuration (using LCM-generated certificates)
       - DEPLOYER_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
       - DEPLOYER_SERVER_CERT_PATH=/app/lcm-certs/deployer-server/server.crt
@@ -462,6 +464,8 @@ services:
       - VAULT_SECRET_ID_FILE=/vault-credentials/secret_id
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=warden-service:9300
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # mTLS server certificate configuration (using LCM-generated certificates)
       - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
       - WARDEN_SERVER_CERT_PATH=/app/certs/warden-server/server.crt
@@ -493,6 +497,8 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=ipam-service:9400
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # mTLS server certificate configuration (using LCM-generated certificates)
       - IPAM_CA_CERT_PATH=/app/certs/ca/ca.crt
       - IPAM_SERVER_CERT_PATH=/app/certs/ipam-server/server.crt
@@ -522,6 +528,8 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=paperless-service:9500
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # S3-compatible storage (rustfs)
       - PAPERLESS_S3_ENDPOINT=rustfs:9000
       - PAPERLESS_S3_ACCESS_KEY=rustfsadmin
@@ -567,6 +575,8 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=sharing-service:9600
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # Upstream services for fetching content
       - WARDEN_GRPC_ENDPOINT=warden-service:9300
       - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt

@@ -6,6 +6,40 @@ auto_generate_ca: true  # Automatically generate self-signed CA if not exists
 shared_secret: "changeme"  # Global shared secret for certificate requests
 ca_cert_path: "/app/data/ca/ca.crt"  # Path to CA certificate
 ca_key_path: "/app/data/ca/ca.key"   # Path to CA private key
+module_registration_secret: "change-me-in-production"  # Secret for module self-service certificate bootstrap (NOT shared_secret)
+
+# Config-driven module certificate generation (replaces hardcoded per-module functions)
+bootstrap_modules:
+  - module_id: deployer
+    client_id: lcm-deployer
+    cert_dir: deployer
+    server_cert_dir: deployer-server
+    display_name: LCM Deployer
+    dns_names: [deployer-service, deployer, localhost, deployer.local]
+  - module_id: warden
+    client_id: lcm-warden
+    cert_dir: warden
+    server_cert_dir: warden-server
+    display_name: LCM Warden
+    dns_names: [warden-service, warden, localhost, warden.local]
+  - module_id: ipam
+    client_id: lcm-ipam
+    cert_dir: ipam
+    server_cert_dir: ipam-server
+    display_name: LCM IPAM
+    dns_names: [ipam-service, ipam, localhost, ipam.local]
+  - module_id: paperless
+    client_id: lcm-paperless
+    cert_dir: paperless
+    server_cert_dir: paperless-server
+    display_name: LCM Paperless
+    dns_names: [paperless-service, paperless, localhost, paperless.local]
+  - module_id: sharing
+    client_id: lcm-sharing
+    cert_dir: sharing
+    server_cert_dir: sharing-server
+    display_name: LCM Sharing
+    dns_names: [sharing-service, sharing, localhost, sharing.local]
 
 # Event notification configuration (Redis pub/sub)
 events:

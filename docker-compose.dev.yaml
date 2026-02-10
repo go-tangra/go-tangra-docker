@@ -333,6 +333,7 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/lcm:/app/configs:ro
       - lcm-data:/app/data
@@ -364,6 +365,7 @@ services:
       - DEPLOYER_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
       - DEPLOYER_SERVER_CERT_PATH=/app/lcm-certs/deployer-server/server.crt
       - DEPLOYER_SERVER_KEY_PATH=/app/lcm-certs/deployer-server/server.key
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/deployer:/app/configs:ro
       - deployer-data:/app/data
@@ -399,6 +401,8 @@ services:
       - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
       - WARDEN_SERVER_CERT_PATH=/app/certs/warden-server/server.crt
       - WARDEN_SERVER_KEY_PATH=/app/certs/warden-server/server.key
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/warden:/app/configs:ro
       - vault-credentials:/vault-credentials:ro
@@ -433,6 +437,8 @@ services:
       - IPAM_CA_CERT_PATH=/app/certs/ca/ca.crt
       - IPAM_SERVER_CERT_PATH=/app/certs/ipam-server/server.crt
       - IPAM_SERVER_KEY_PATH=/app/certs/ipam-server/server.key
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/ipam:/app/configs:ro
       - ipam-data:/app/data
@@ -474,6 +480,8 @@ services:
       - PAPERLESS_CA_CERT_PATH=/app/certs/ca/ca.crt
       - PAPERLESS_SERVER_CERT_PATH=/app/certs/paperless-server/server.crt
       - PAPERLESS_SERVER_KEY_PATH=/app/certs/paperless-server/server.key
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
     volumes:
       - ./configs/paperless:/app/configs:ro
       - paperless-data:/app/data
