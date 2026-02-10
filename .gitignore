@@ -26,3 +26,6 @@ temp/
 
 # GCP service account keys
 configs/lcm/gcp-dns-sa.json
+
+# Claude Code
+CLAUDE.md

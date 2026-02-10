@@ -40,6 +40,12 @@ bootstrap_modules:
     server_cert_dir: sharing-server
     display_name: LCM Sharing
     dns_names: [sharing-service, sharing, localhost, sharing.local]
+  - module_id: bookmark
+    client_id: lcm-bookmark
+    cert_dir: bookmark
+    server_cert_dir: bookmark-server
+    display_name: LCM Bookmark
+    dns_names: [bookmark-service, bookmark, localhost, bookmark.local]
 
 # Event notification configuration (Redis pub/sub)
 events:

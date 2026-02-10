@@ -1,0 +1,10 @@
+data:
+  database:
+    driver: "postgresql"
+    source: "postgres://postgres:*Abcd123456@postgres:5432/gwa?sslmode=disable"
+    max_connections: 20
+
+  redis:
+    addr: "redis:6379"
+    password: "*Abcd123456"
+    db: 0

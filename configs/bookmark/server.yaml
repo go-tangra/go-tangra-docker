@@ -1,0 +1,4 @@
+server:
+  grpc:
+    addr: "0.0.0.0:9700"
+    timeout: 30s
