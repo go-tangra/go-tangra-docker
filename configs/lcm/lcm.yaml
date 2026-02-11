@@ -46,6 +46,12 @@ bootstrap_modules:
     server_cert_dir: bookmark-server
     display_name: LCM Bookmark
     dns_names: [bookmark-service, bookmark, localhost, bookmark.local]
+  - module_id: executor
+    client_id: lcm-executor
+    cert_dir: executor
+    server_cert_dir: executor-server
+    display_name: LCM Executor
+    dns_names: [executor-service, executor, localhost, executor.local]
 
 # Event notification configuration (Redis pub/sub)
 events:
