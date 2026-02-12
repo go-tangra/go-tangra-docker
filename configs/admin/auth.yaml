@@ -15,6 +15,12 @@ authn:
       - "key1"
       - "key2"
 
+webauthn:
+  rp_display_name: "GoTangra"
+  rp_id: "localhost"
+  rp_origins:
+    - "http://localhost:8080"
+
 authz:
   type: "opa" # casbin, opa, zanzibar, noop
 
