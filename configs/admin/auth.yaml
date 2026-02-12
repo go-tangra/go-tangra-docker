@@ -17,8 +17,9 @@ authn:
 
 webauthn:
   rp_display_name: "GoTangra"
-  rp_id: "localhost"
+  rp_id: "portal.infra.verax.net"
   rp_origins:
+    - "https://portal.infra.verax.net"
     - "http://localhost:8080"
 
 authz:
