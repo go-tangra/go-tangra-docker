@@ -461,6 +461,8 @@ services:
       dockerfile: Dockerfile
     image: go-tangra/ipam-service:latest
     restart: always
+    cap_add:
+      - NET_RAW
     ports:
       - "9400:9400"
     networks:

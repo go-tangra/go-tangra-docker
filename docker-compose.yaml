@@ -526,6 +526,8 @@ services:
   ipam-service:
     image: ghcr.io/go-tangra/go-tangra-ipam:latest
     restart: always
+    cap_add:
+      - NET_RAW
     ports:
       - "9400:9400"
     networks:
