@@ -11,10 +11,12 @@ RESTART IDENTITY CASCADE;
 
 -- 后台目录
 INSERT INTO public.sys_menus(id, parent_id, type, name, path, redirect, component, status, created_at, meta)
-VALUES (1, null, 'CATALOG', 'Dashboard', '/dashboard', null, 'BasicLayout', 'ON', now(),
+VALUES (1, null, 'CATALOG', 'Dashboard', '/dashboard', '/dashboard/overview', 'BasicLayout', 'ON', now(),
         '{"order":-1, "title":"page.dashboard.title", "icon":"lucide:layout-dashboard", "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false, "authority":["platform:admin", "tenant:manager"]}'),
        (2, 1, 'MENU', 'Analytics', 'analytics', null, 'dashboard/analytics/index.vue', 'ON', now(),
-        '{"order":-1, "title":"page.dashboard.analytics", "icon":"lucide:area-chart", "affixTab": true, "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false, "authority":["platform:admin", "tenant:manager"]}'),
+        '{"order":1, "title":"page.dashboard.analytics", "icon":"lucide:area-chart", "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false, "authority":["platform:admin", "tenant:manager"]}'),
+       (3, 1, 'MENU', 'DynamicDashboard', 'overview', null, 'dashboard/dynamic/index.vue', 'ON', now(),
+        '{"order":-1, "title":"page.dashboard.overview", "icon":"lucide:layout-dashboard", "affixTab": true, "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false, "authority":["platform:admin", "tenant:manager"]}'),
 
        (10, null, 'CATALOG', 'TenantManagement', '/tenant', null, 'BasicLayout', 'ON', now(),
         '{"order":2000, "title":"menu.tenant.moduleName", "icon":"lucide:building-2", "keepAlive":true, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false, "authority":["platform:admin"]}'),

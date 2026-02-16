@@ -120,6 +120,14 @@ services:
         else
           echo "Database already has $$COUNT menu records, skipping seed."
         fi
+
+        # Run TimescaleDB setup (hypertables, continuous aggregates, compression)
+        echo "Setting up TimescaleDB time-series features..."
+        if psql -h postgres -U postgres -d gwa -f /sql/timescaledb-setup.sql; then
+          echo "TimescaleDB setup completed successfully!"
+        else
+          echo "WARNING: TimescaleDB setup had issues (non-fatal, service will still work)"
+        fi
         exit 0
     depends_on:
       postgres:

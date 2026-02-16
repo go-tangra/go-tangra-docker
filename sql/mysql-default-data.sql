@@ -11,10 +11,12 @@ TRUNCATE TABLE sys_menus AUTO_INCREMENT = 1;
 -- 15. 插入后台菜单/目录（JSON字段meta直接适配MySQL）
 -- ==============================================
 INSERT INTO sys_menus(id, parent_id, type, name, path, redirect, component, status, created_at, meta)
-VALUES (1, null, 'CATALOG', 'Dashboard', '/dashboard', null, 'BasicLayout', 'ON', NOW(),
+VALUES (1, null, 'CATALOG', 'Dashboard', '/dashboard', '/dashboard/overview', 'BasicLayout', 'ON', NOW(),
         '{"order":-1, "title":"page.dashboard.title", "icon":"lucide:layout-dashboard", "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false}'),
        (2, 1, 'MENU', 'Analytics', 'analytics', null, 'dashboard/analytics/index.vue', 'ON', NOW(),
-        '{"order":-1, "title":"page.dashboard.analytics", "icon":"lucide:area-chart", "affixTab": true, "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false}'),
+        '{"order":1, "title":"page.dashboard.analytics", "icon":"lucide:area-chart", "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false}'),
+       (3, 1, 'MENU', 'DynamicDashboard', 'overview', null, 'dashboard/dynamic/index.vue', 'ON', NOW(),
+        '{"order":-1, "title":"page.dashboard.overview", "icon":"lucide:layout-dashboard", "affixTab": true, "keepAlive":false, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false}'),
 
        (10, null, 'CATALOG', 'TenantManagement', '/tenant', null, 'BasicLayout', 'ON', NOW(),
         '{"order":2000, "title":"menu.tenant.moduleName", "icon":"lucide:building-2", "keepAlive":true, "hideInBreadcrumb":false, "hideInMenu":false, "hideInTab":false}'),
