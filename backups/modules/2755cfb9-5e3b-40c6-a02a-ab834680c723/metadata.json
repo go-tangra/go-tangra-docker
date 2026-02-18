@@ -1,0 +1,27 @@
+{
+  "id": "2755cfb9-5e3b-40c6-a02a-ab834680c723",
+  "module_id": "ipam",
+  "full_backup": true,
+  "status": "completed",
+  "size_bytes": 120,
+  "entity_counts": {
+    "deviceInterfaces": 0,
+    "devices": 0,
+    "dnsConfigs": 0,
+    "hostGroupMembers": 0,
+    "hostGroups": 0,
+    "ipAddresses": 0,
+    "ipGroupMembers": 0,
+    "ipGroups": 0,
+    "ipScanJobs": 0,
+    "locations": 0,
+    "subnets": 0,
+    "vlans": 0
+  },
+  "created_at": {
+    "seconds": 1771371789,
+    "nanos": 955978426
+  },
+  "created_by": "admin",
+  "version": "1.0"
+}

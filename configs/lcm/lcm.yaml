@@ -58,6 +58,12 @@ bootstrap_modules:
     server_cert_dir: asset-server
     display_name: LCM Asset
     dns_names: [asset-service, asset, localhost, asset.local]
+  - module_id: backup
+    client_id: lcm-backup
+    cert_dir: backup
+    server_cert_dir: backup-server
+    display_name: LCM Backup
+    dns_names: [backup-service, backup, localhost, backup.local]
 
 # Event notification configuration (Redis pub/sub)
 events:

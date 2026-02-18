@@ -1,11 +1,11 @@
 server:
   grpc:
     addr: ":7787"
-    timeout: 10s
+    timeout: 120s
 
   rest:
     addr: ":7788"
-    timeout: 10s
+    timeout: 120s
     enable_swagger: true
     enable_pprof: true
     cors:

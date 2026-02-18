@@ -27,6 +27,7 @@ volumes:
   executor-data:
   vault-data:
   vault-credentials:  # Shared volume for Vault AppRole credentials
+  backup-data:
 
 services:
   # ===========================================
@@ -155,15 +156,17 @@ services:
              [ -f /app/data/bookmark-server/server.crt ] && \
              [ -f /app/data/executor/executor.crt ] && \
              [ -f /app/data/executor-server/server.crt ] && \
-             [ -f /app/data/asset-server/server.crt ]; then
+             [ -f /app/data/asset-server/server.crt ] && \
+             [ -f /app/data/backup/backup.crt ] && \
+             [ -f /app/data/backup-server/server.crt ]; then
             echo "All certificates found!"
             # Set permissions on certificate directories
-            chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer /app/data/executor
-            chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server /app/data/bookmark-server /app/data/executor-server /app/data/asset-server
-            chmod 644 /app/data/ca/*.crt /app/data/admin/*.crt /app/data/deployer/*.crt /app/data/executor/*.crt
-            chmod 644 /app/data/warden-server/*.crt /app/data/ipam-server/*.crt /app/data/paperless-server/*.crt /app/data/deployer-server/*.crt /app/data/bookmark-server/*.crt /app/data/executor-server/*.crt /app/data/asset-server/*.crt
-            chmod 600 /app/data/admin/*.key /app/data/deployer/*.key /app/data/executor/*.key
-            chmod 600 /app/data/warden-server/*.key /app/data/ipam-server/*.key /app/data/paperless-server/*.key /app/data/deployer-server/*.key /app/data/bookmark-server/*.key /app/data/executor-server/*.key /app/data/asset-server/*.key
+            chmod -R 755 /app/data/ca /app/data/admin /app/data/deployer /app/data/executor /app/data/backup
+            chmod -R 755 /app/data/warden-server /app/data/ipam-server /app/data/paperless-server /app/data/deployer-server /app/data/bookmark-server /app/data/executor-server /app/data/asset-server /app/data/backup-server
+            chmod 644 /app/data/ca/*.crt /app/data/admin/*.crt /app/data/deployer/*.crt /app/data/executor/*.crt /app/data/backup/*.crt
+            chmod 644 /app/data/warden-server/*.crt /app/data/ipam-server/*.crt /app/data/paperless-server/*.crt /app/data/deployer-server/*.crt /app/data/bookmark-server/*.crt /app/data/executor-server/*.crt /app/data/asset-server/*.crt /app/data/backup-server/*.crt
+            chmod 600 /app/data/admin/*.key /app/data/deployer/*.key /app/data/executor/*.key /app/data/backup/*.key
+            chmod 600 /app/data/warden-server/*.key /app/data/ipam-server/*.key /app/data/paperless-server/*.key /app/data/deployer-server/*.key /app/data/bookmark-server/*.key /app/data/executor-server/*.key /app/data/asset-server/*.key /app/data/backup-server/*.key
             echo "Certificate permissions set"
             echo "Certificates ready:"
             echo "  - CA: /app/data/ca/ca.crt"
@@ -177,6 +180,8 @@ services:
             echo "  - Bookmark server: /app/data/bookmark-server/server.crt"
             echo "  - Executor server: /app/data/executor-server/server.crt"
             echo "  - Asset server: /app/data/asset-server/server.crt"
+            echo "  - Backup client: /app/data/backup/backup.crt"
+            echo "  - Backup server: /app/data/backup-server/server.crt"
             exit 0
           fi
           counter=$$((counter + 1))
@@ -336,6 +341,12 @@ services:
       - ASSET_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
       - ASSET_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
       - ASSET_SERVER_NAME=asset-service
+      # Backup service - uses mTLS with proper server certificates
+      - BACKUP_GRPC_ENDPOINT=backup-service:10100
+      - BACKUP_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - BACKUP_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - BACKUP_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - BACKUP_SERVER_NAME=backup-service
     volumes:
       - ./configs/admin:/app/configs:ro
       - admin-data:/app/data
@@ -659,6 +670,40 @@ services:
         condition: service_healthy
       rustfs:
         condition: service_started
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
+  backup-service:
+    build:
+      context: ../go-tangra-backup
+      dockerfile: Dockerfile
+    image: go-tangra/backup-service:latest
+    restart: always
+    ports:
+      - "10100:10100"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=backup-service:10100
+      - BACKUP_STORAGE_PATH=/data/backups
+      # mTLS server certificate configuration (using LCM-generated certificates)
+      - BACKUP_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - BACKUP_SERVER_CERT_PATH=/app/certs/backup-server/server.crt
+      - BACKUP_SERVER_KEY_PATH=/app/certs/backup-server/server.key
+      # mTLS client certificate (for calling other modules' BackupService)
+      - BACKUP_CLIENT_CERT_PATH=/app/certs/backup/backup.crt
+      - BACKUP_CLIENT_KEY_PATH=/app/certs/backup/backup.key
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
+    volumes:
+      - ./configs/backup:/app/configs:ro
+      - backup-data:/data/backups
+      - lcm-data:/app/certs:ro  # Mount LCM data for mTLS certificates (client + server certs)
+    depends_on:
       lcm-init:
         condition: service_completed_successfully
       admin-service:
