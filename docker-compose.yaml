@@ -418,6 +418,12 @@ services:
       - ASSET_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
       - ASSET_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
       - ASSET_SERVER_NAME=asset-service
+      # Backup service - uses mTLS with proper server certificates
+      - BACKUP_GRPC_ENDPOINT=backup-service:10100
+      - BACKUP_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - BACKUP_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - BACKUP_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - BACKUP_SERVER_NAME=backup-service
     volumes:
       - ./configs/admin:/app/configs:ro
       - admin-data:/app/data
