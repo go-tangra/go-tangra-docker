@@ -381,6 +381,7 @@ services:
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=lcm-service:9100
       - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
+      - ADDITIONAL_DOMAINS=${ADDITIONAL_DOMAINS:-}
     volumes:
       - ./configs/lcm:/app/configs:ro
       - lcm-data:/app/data
