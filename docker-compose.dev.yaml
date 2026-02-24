@@ -129,8 +129,8 @@ services:
   # Init container to wait for LCM to generate certificates
   lcm-init:
     build:
-      context: ..
-      dockerfile: go-tangra-lcm/Dockerfile
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
     image: go-tangra/lcm-service:latest
     networks:
       - app-tier
@@ -281,8 +281,8 @@ services:
 
   admin-service:
     build:
-      context: ..
-      dockerfile: go-tangra-portal/app/admin/service/Dockerfile
+      context: ../go-tangra-portal
+      dockerfile: app/admin/service/Dockerfile
     image: go-tangra/admin-service:latest
     restart: always
     ports:
@@ -373,8 +373,8 @@ services:
 
   lcm-service:
     build:
-      context: ..
-      dockerfile: go-tangra-lcm/Dockerfile
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
     image: go-tangra/lcm-service:latest
     restart: always
     ports:
@@ -403,8 +403,8 @@ services:
 
   deployer-service:
     build:
-      context: ..
-      dockerfile: go-tangra-deployer/Dockerfile
+      context: ../go-tangra-deployer
+      dockerfile: Dockerfile
     image: go-tangra/deployer-service:latest
     restart: always
     ports:
@@ -444,8 +444,8 @@ services:
 
   warden-service:
     build:
-      context: ..
-      dockerfile: go-tangra-warden/Dockerfile
+      context: ../go-tangra-warden
+      dockerfile: Dockerfile
     image: go-tangra/warden-service:latest
     restart: always
     ports:
@@ -487,8 +487,8 @@ services:
 
   ipam-service:
     build:
-      context: ..
-      dockerfile: go-tangra-ipam/Dockerfile
+      context: ../go-tangra-ipam
+      dockerfile: Dockerfile
     image: go-tangra/ipam-service:latest
     restart: always
     cap_add:
@@ -527,8 +527,8 @@ services:
 
   paperless-service:
     build:
-      context: ..
-      dockerfile: go-tangra-paperless/Dockerfile
+      context: ../go-tangra-paperless
+      dockerfile: Dockerfile
     image: go-tangra/paperless-service:latest
     restart: always
     ports:
@@ -589,8 +589,8 @@ services:
 
   sharing-service:
     build:
-      context: ..
-      dockerfile: go-tangra-sharing/Dockerfile
+      context: ../go-tangra-sharing
+      dockerfile: Dockerfile
     image: go-tangra/sharing-service:latest
     restart: always
     ports:
@@ -685,8 +685,8 @@ services:
 
   executor-service:
     build:
-      context: ..
-      dockerfile: go-tangra-executor/Dockerfile
+      context: ../go-tangra-executor
+      dockerfile: Dockerfile
     image: go-tangra/executor-service:latest
     restart: always
     ports:
@@ -729,8 +729,8 @@ services:
 
   asset-service:
     build:
-      context: ..
-      dockerfile: go-tangra-asset/Dockerfile
+      context: ../go-tangra-asset
+      dockerfile: Dockerfile
     image: go-tangra/asset-service:latest
     restart: always
     ports:
@@ -783,8 +783,8 @@ services:
 
   backup-service:
     build:
-      context: ..
-      dockerfile: go-tangra-backup/Dockerfile
+      context: ../go-tangra-backup
+      dockerfile: Dockerfile
     image: go-tangra/backup-service:latest
     restart: always
     ports:
