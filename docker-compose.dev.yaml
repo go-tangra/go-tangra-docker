@@ -129,8 +129,8 @@ services:
   # Init container to wait for LCM to generate certificates
   lcm-init:
     build:
-      context: ../go-tangra-lcm
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-lcm/Dockerfile
     image: go-tangra/lcm-service:latest
     networks:
       - app-tier
@@ -281,8 +281,8 @@ services:
 
   admin-service:
     build:
-      context: ../go-tangra-portal
-      dockerfile: app/admin/service/Dockerfile
+      context: ..
+      dockerfile: go-tangra-portal/app/admin/service/Dockerfile
     image: go-tangra/admin-service:latest
     restart: always
     ports:
@@ -323,6 +323,12 @@ services:
       - PAPERLESS_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
       - PAPERLESS_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
       - PAPERLESS_SERVER_NAME=paperless-service
+      # Sharing service - uses mTLS with proper server certificates
+      - SHARING_GRPC_ENDPOINT=sharing-service:9600
+      - SHARING_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
+      - SHARING_CLIENT_CERT_PATH=/app/lcm-certs/admin/admin.crt
+      - SHARING_CLIENT_KEY_PATH=/app/lcm-certs/admin/admin.key
+      - SHARING_SERVER_NAME=sharing-service
       # Bookmark service - uses mTLS with proper server certificates
       - BOOKMARK_GRPC_ENDPOINT=bookmark-service:9700
       - BOOKMARK_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
@@ -367,19 +373,23 @@ services:
 
   lcm-service:
     build:
-      context: ../go-tangra-lcm
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-lcm/Dockerfile
     image: go-tangra/lcm-service:latest
     restart: always
     ports:
       - "8000:8000"
       - "9100:9100"
+      - "9101:9101"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=lcm-service:9100
+      - FRONTEND_ENTRY_URL=/modules/lcm/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=lcm-service:9101
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       - ADDITIONAL_DOMAINS=${ADDITIONAL_DOMAINS:-}
     volumes:
@@ -393,12 +403,13 @@ services:
 
   deployer-service:
     build:
-      context: ../go-tangra-deployer
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-deployer/Dockerfile
     image: go-tangra/deployer-service:latest
     restart: always
     ports:
       - "9200:9200"
+      - "9201:9201"
     networks:
       - app-tier
     environment:
@@ -409,6 +420,9 @@ services:
       - LCM_CLIENT_KEY_PATH=/app/lcm-certs/deployer/deployer.key
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=deployer-service:9200
+      - FRONTEND_ENTRY_URL=/modules/deployer/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=deployer-service:9201
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # mTLS server certificate configuration (using LCM-generated certificates)
       - DEPLOYER_CA_CERT_PATH=/app/lcm-certs/ca/ca.crt
       - DEPLOYER_SERVER_CERT_PATH=/app/lcm-certs/deployer-server/server.crt
@@ -430,12 +444,13 @@ services:
 
   warden-service:
     build:
-      context: ../go-tangra-warden
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-warden/Dockerfile
     image: go-tangra/warden-service:latest
     restart: always
     ports:
       - "9300:9300"
+      - "9301:9301"
     networks:
       - app-tier
     environment:
@@ -445,6 +460,9 @@ services:
       - VAULT_SECRET_ID_FILE=/vault-credentials/secret_id
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=warden-service:9300
+      - FRONTEND_ENTRY_URL=/modules/warden/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=warden-service:9301
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # mTLS server certificate configuration (using LCM-generated certificates)
       - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
       - WARDEN_SERVER_CERT_PATH=/app/certs/warden-server/server.crt
@@ -469,20 +487,24 @@ services:
 
   ipam-service:
     build:
-      context: ../go-tangra-ipam
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-ipam/Dockerfile
     image: go-tangra/ipam-service:latest
     restart: always
     cap_add:
       - NET_RAW
     ports:
       - "9400:9400"
+      - "9401:9401"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=ipam-service:9400
+      - FRONTEND_ENTRY_URL=/modules/ipam/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=ipam-service:9401
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # mTLS server certificate configuration (using LCM-generated certificates)
       - IPAM_CA_CERT_PATH=/app/certs/ca/ca.crt
       - IPAM_SERVER_CERT_PATH=/app/certs/ipam-server/server.crt
@@ -505,8 +527,8 @@ services:
 
   paperless-service:
     build:
-      context: ../go-tangra-paperless
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-paperless/Dockerfile
     image: go-tangra/paperless-service:latest
     restart: always
     ports:
@@ -518,6 +540,9 @@ services:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=paperless-service:9500
+      - FRONTEND_ENTRY_URL=/modules/paperless/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=paperless-service:9501
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # Public HTTP server for signing
       - PAPERLESS_HTTP_ADDR=0.0.0.0:9501
       - APP_HOST=${APP_HOST:-http://localhost:8080}
@@ -562,6 +587,64 @@ services:
       admin-service:
         condition: service_healthy
 
+  sharing-service:
+    build:
+      context: ..
+      dockerfile: go-tangra-sharing/Dockerfile
+    image: go-tangra/sharing-service:latest
+    restart: always
+    ports:
+      - "9600:9600"
+      - "9601:9601"
+    networks:
+      - app-tier
+    environment:
+      - TZ=UTC
+      - ADMIN_GRPC_ENDPOINT=admin-service:7787
+      - GRPC_ADVERTISE_ADDR=sharing-service:9600
+      - FRONTEND_ENTRY_URL=/modules/sharing/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=sharing-service:9601
+      - FRONTEND_DIST_PATH=/app/frontend-dist
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
+      # Upstream services for fetching content
+      - WARDEN_GRPC_ENDPOINT=warden-service:9300
+      - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - WARDEN_CLIENT_CERT_PATH=/app/certs/sharing/sharing.crt
+      - WARDEN_CLIENT_KEY_PATH=/app/certs/sharing/sharing.key
+      - WARDEN_SERVER_NAME=warden-service
+      - PAPERLESS_GRPC_ENDPOINT=paperless-service:9500
+      - PAPERLESS_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - PAPERLESS_CLIENT_CERT_PATH=/app/certs/sharing/sharing.crt
+      - PAPERLESS_CLIENT_KEY_PATH=/app/certs/sharing/sharing.key
+      - PAPERLESS_SERVER_NAME=paperless-service
+      # SMTP configuration
+      - SMTP_HOST=${SMTP_HOST:-localhost}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@example.com}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      # Encryption and app host
+      - SHARING_ENCRYPTION_KEY=${SHARING_ENCRYPTION_KEY:-}
+      - APP_HOST=${APP_HOST:-http://localhost:5173}
+      # mTLS server certificate configuration
+      - SHARING_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - SHARING_SERVER_CERT_PATH=/app/certs/sharing-server/server.crt
+      - SHARING_SERVER_KEY_PATH=/app/certs/sharing-server/server.key
+    volumes:
+      - ./configs/sharing:/app/configs:ro
+      - lcm-data:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-init:
+        condition: service_completed_successfully
+      admin-service:
+        condition: service_healthy
+
   bookmark-service:
     build:
       context: ../rust-tangra-bookmark
@@ -570,12 +653,16 @@ services:
     restart: always
     ports:
       - "9700:9700"
+      - "9701:9701"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=bookmark-service:9700
+      - FRONTEND_ENTRY_URL=/modules/bookmark/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=bookmark-service:9701
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # mTLS server certificate configuration (using LCM-generated certificates)
       - BOOKMARK_CA_CERT_PATH=/app/certs/ca/ca.crt
       - BOOKMARK_SERVER_CERT_PATH=/app/certs/bookmark-server/server.crt
@@ -598,18 +685,22 @@ services:
 
   executor-service:
     build:
-      context: ../go-tangra-executor
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-executor/Dockerfile
     image: go-tangra/executor-service:latest
     restart: always
     ports:
       - "9800:9800"
+      - "9801:9801"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=executor-service:9800
+      - FRONTEND_ENTRY_URL=/modules/executor/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=executor-service:9801
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       - LCM_GRPC_ENDPOINT=lcm-service:9100
       - MODULE_REGISTRATION_SECRET=${MODULE_REGISTRATION_SECRET:-change-me-in-production}
       # Portal service for password verification
@@ -638,18 +729,22 @@ services:
 
   asset-service:
     build:
-      context: ../go-tangra-asset
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-asset/Dockerfile
     image: go-tangra/asset-service:latest
     restart: always
     ports:
       - "9900:9900"
+      - "9901:9901"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=asset-service:9900
+      - FRONTEND_ENTRY_URL=/modules/asset/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=asset-service:9901
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       # S3-compatible storage (rustfs)
       - ASSET_S3_ENDPOINT=rustfs:9000
       - ASSET_S3_ACCESS_KEY=rustfsadmin
@@ -688,18 +783,22 @@ services:
 
   backup-service:
     build:
-      context: ../go-tangra-backup
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: go-tangra-backup/Dockerfile
     image: go-tangra/backup-service:latest
     restart: always
     ports:
       - "10100:10100"
+      - "10101:10101"
     networks:
       - app-tier
     environment:
       - TZ=UTC
       - ADMIN_GRPC_ENDPOINT=admin-service:7787
       - GRPC_ADVERTISE_ADDR=backup-service:10100
+      - FRONTEND_ENTRY_URL=/modules/backup/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=backup-service:10101
+      - FRONTEND_DIST_PATH=/app/frontend-dist
       - BACKUP_STORAGE_PATH=/data/backups
       # mTLS server certificate configuration (using LCM-generated certificates)
       - BACKUP_CA_CERT_PATH=/app/certs/ca/ca.crt
