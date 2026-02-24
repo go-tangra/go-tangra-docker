@@ -19,6 +19,7 @@ logs/
 
 # Data directories (if mounted locally)
 data/
+backups/
 
 # Temporary files
 tmp/
