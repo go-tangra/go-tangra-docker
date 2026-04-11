@@ -1,0 +1,36 @@
+# Warden Service Configuration
+
+vault:
+  # Vault server address (use Docker service name)
+  address: "http://vault:8200"
+
+  # AppRole authentication (loaded from files via environment variables)
+  role_id: ""
+  secret_id: ""
+
+  # KV secrets engine mount path
+  mount_path: "secret"
+
+  # Optional namespace (for Vault Enterprise)
+  namespace: ""
+
+  # Retry configuration
+  retry_max: 3
+  retry_wait_min: "1s"
+  retry_wait_max: "5s"
+
+  # Connection timeout
+  timeout: "30s"
+
+# Secret management settings
+secrets:
+  # Maximum versions to keep per secret (0 = unlimited)
+  max_versions: 10
+
+  # Default password requirements for generation
+  password_policy:
+    min_length: 16
+    require_uppercase: true
+    require_lowercase: true
+    require_numbers: true
+    require_symbols: true

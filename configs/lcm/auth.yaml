@@ -1,0 +1,11 @@
+authn:
+  type: "jwt" # jwt, preshared_key
+
+  jwt:
+    method: "HS256" # HS256, HS384, HS512, RS256, RS384, RS512, ES256, ES384, ES512, Ed25519
+    key: "some_api_key"
+
+  preshared_key:
+    valid_keys:
+      - "key1"
+      - "key2"

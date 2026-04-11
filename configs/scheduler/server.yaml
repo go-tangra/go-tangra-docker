@@ -1,0 +1,22 @@
+server:
+  grpc:
+    addr: "0.0.0.0:10500"
+    timeout: 30s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+
+  asynq:
+    uri: "redis://:*Abcd123456@redis:6379/2"
+    enable_gracefully_shutdown: true
+    shutdown_timeout: 3s
+    codec: "json"
+    concurrency: 10
+    queues:
+      critical: 10
+      default: 5
+      low: 1
+    enable_strict_priority: true

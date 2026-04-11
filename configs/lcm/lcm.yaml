@@ -1,0 +1,24 @@
+# LCM service configuration
+data_dir: /app/data
+default_validity_days: 365
+auto_approve_certificates: true  # Set to true for automatic approval (like Puppet auto-signing)
+auto_generate_ca: true  # Automatically generate self-signed CA if not exists
+shared_secret: "changeme"  # Global shared secret for certificate requests
+ca_cert_path: "/app/data/ca/ca.crt"  # Path to CA certificate
+ca_key_path: "/app/data/ca/ca.key"   # Path to CA private key
+
+# Event notification configuration (Redis pub/sub)
+events:
+  enabled: true
+  topic_prefix: "lcm"
+
+# Webhook notification configuration
+webhooks:
+  enabled: false  # Set to true to enable webhooks
+  timeout_seconds: 30
+  worker_count: 2
+  retry:
+    max_attempts: 3
+    initial_delay_ms: 1000
+    max_delay_ms: 60000
+    backoff_multiplier: 2.0
