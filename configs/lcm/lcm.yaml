@@ -7,6 +7,34 @@ shared_secret: "changeme"  # Global shared secret for certificate requests
 ca_cert_path: "/app/data/ca/ca.crt"  # Path to CA certificate
 ca_key_path: "/app/data/ca/ca.key"   # Path to CA private key
 
+# Module certificate bootstrap
+bootstrap_modules:
+  - module_id: deployer
+    client_id: lcm-deployer
+    cert_dir: deployer
+    server_cert_dir: deployer-server
+    display_name: LCM Deployer
+  - module_id: warden
+    client_id: lcm-warden
+    cert_dir: warden
+    server_cert_dir: warden-server
+    display_name: LCM Warden
+  - module_id: ipam
+    client_id: lcm-ipam
+    cert_dir: ipam
+    server_cert_dir: ipam-server
+    display_name: LCM IPAM
+  - module_id: paperless
+    client_id: lcm-paperless
+    cert_dir: paperless
+    server_cert_dir: paperless-server
+    display_name: LCM Paperless
+  - module_id: scheduler
+    client_id: lcm-scheduler
+    cert_dir: scheduler
+    server_cert_dir: scheduler-server
+    display_name: LCM Scheduler
+
 # Event notification configuration (Redis pub/sub)
 events:
   enabled: true
