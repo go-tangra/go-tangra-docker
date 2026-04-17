@@ -492,6 +492,7 @@ services:
     restart: always
     ports:
       - "10500:10500"
+      - "10501:10501"
     networks:
       - app-tier
     environment:
@@ -503,6 +504,8 @@ services:
       - SCHEDULER_SERVER_CERT_PATH=/app/certs/scheduler-server/server.crt
       - SCHEDULER_SERVER_KEY_PATH=/app/certs/scheduler-server/server.key
       - CERTS_DIR=/app/certs
+      - FRONTEND_ENTRY_URL=/modules/scheduler/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=scheduler-service:10501
     volumes:
       - ./configs/scheduler:/app/configs:ro
       - scheduler-data:/app/data
