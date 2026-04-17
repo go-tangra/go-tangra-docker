@@ -1,5 +1,5 @@
 server:
-  http:
+  rest:
     addr: "0.0.0.0:10501"
     timeout: 30s
 
