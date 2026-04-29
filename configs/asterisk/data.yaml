@@ -1,0 +1,13 @@
+# MySQL connection to FreePBX databases (asterisk + asteriskcdrdb).
+# This module is read-only; no Ent / migrations.
+data:
+  asterisk:
+    # DSN to the FreePBX server. The same MySQL host hosts both databases —
+    # we open one *sql.DB per logical database. parseTime=true is required
+    # for datetime decoding; loc=UTC keeps timestamps consistent.
+    cdr_dsn: "root:*Abcd123456@tcp(percona:3306)/asteriskcdrdb?parseTime=true&loc=UTC"
+    config_dsn: "root:*Abcd123456@tcp(percona:3306)/asterisk?parseTime=true&loc=UTC"
+    max_open_conns: 25
+    max_idle_conns: 5
+    conn_max_lifetime: 30m
+    query_timeout: 30s
