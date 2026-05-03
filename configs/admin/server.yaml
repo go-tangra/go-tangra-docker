@@ -44,3 +44,10 @@ server:
     path: "/events"
     auto_stream: true
     auto_reply: false
+
+  asynq:
+    uri: "redis://:*Abcd123456@redis:6379/1"
+    enable_gracefully_shutdown: true
+    shutdown_timeout: 3s
+    codec: "json"
+    concurrency: 1

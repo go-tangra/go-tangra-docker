@@ -1,0 +1,17 @@
+server:
+  grpc:
+    addr: "0.0.0.0:10200"
+    timeout: 10s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+
+hr:
+  events:
+    enabled: true
+    topic_prefix: "paperless"
+    subscribe_events:
+      - "signing.request.completed"

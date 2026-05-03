@@ -1,0 +1,17 @@
+server:
+  grpc:
+    addr: "0.0.0.0:9900"
+    timeout: 30s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+  # Kratos's HTTP server here is unused: the public HTTP server is built
+  # explicitly in internal/server/http.go and binds HTTP_PUBLIC_BIND
+  # (default 0.0.0.0:9901) so the legacy /hermes/v1/sms* paths land on
+  # exactly the address we advertise.
+  http:
+    addr: "0.0.0.0:9901"
+    timeout: 30s

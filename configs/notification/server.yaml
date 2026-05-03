@@ -1,0 +1,16 @@
+server:
+  grpc:
+    addr: "0.0.0.0:10300"
+    timeout: 30s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true
+  sse:
+    addr: ":10302"
+    codec: "json"
+    path: "/events"
+    auto_stream: true
+    auto_reply: false

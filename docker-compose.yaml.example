@@ -1,0 +1,1315 @@
+networks:
+  app-tier:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  percona-data:
+  redis-data:
+  rustfs-data:
+  admin-data:
+  lcm-data:
+  lcm-certs:  # Shared volume for LCM certificates (CA + admin cert)
+  deployer-data:
+  warden-data:
+  ipam-data:
+  paperless-data:
+  scheduler-data:
+  vault-data:
+  vault-credentials:  # Shared volume for Vault AppRole credentials
+  prometheus-data:
+  grafana-data:
+  # Per-service private cert directories used by the registration-rework
+  # cert.Ensure() flow. Each migrated module owns its own named volume
+  # here — no more shared lcm-data:ro mount on modules.
+  sms-gw-certs:
+  warden-certs:
+  ipam-certs:
+  paperless-certs:
+  scheduler-certs:
+  asterisk-certs:
+  deployer-certs:
+  admin-certs:
+  hr-certs:
+  notification-certs:
+  backup-certs:
+  sharing-certs:
+  signing-certs:
+  asset-certs:
+  executor-certs:
+
+services:
+  # ===========================================
+  # Application Services
+  # ===========================================
+
+  frontend:
+    build:
+      context: ../go-tangra-frontend
+      dockerfile: Dockerfile
+    image: go-tangra/go-tangra-portal-frontend:latest
+    restart: always
+    ports:
+      - "8080:8080"
+    networks:
+      - app-tier
+    environment:
+      # Nginx proxy backend configuration
+      - BACKEND_HOST=admin-service
+      - BACKEND_PORT=7788
+      - SSE_PORT=7789
+      # Frontend API URLs (relative paths, proxied through nginx)
+      - VITE_GLOB_API_URL=/admin
+      - VITE_GLOB_SSE_URL=/sse/events
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf.template:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        envsubst '$${BACKEND_HOST} $${BACKEND_PORT} $${SSE_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
+        /docker-entrypoint.sh nginx -g 'daemon off;'
+    depends_on:
+      admin-service:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+
+  # Init container to seed database with default data
+  # NOTE: This runs AFTER admin-service creates the schema
+  db-init:
+    image: docker.io/timescale/timescaledb:latest-pg15
+    restart: "no"
+    networks:
+      - app-tier
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for database and schema to be ready..."
+
+        # Wait for postgres to be ready
+        until pg_isready -h postgres -U postgres; do
+          echo "Database not ready, waiting..."
+          sleep 2
+        done
+
+        # Wait for admin-service to create the sys_menus table (schema migration)
+        echo "Waiting for sys_menus table to be created by admin-service..."
+        RETRY=0
+        MAX_RETRIES=60
+        while [ $$RETRY -lt $$MAX_RETRIES ]; do
+          if psql -h postgres -U postgres -d gwa -c "SELECT 1 FROM sys_menus LIMIT 1;" >/dev/null 2>&1; then
+            echo "Schema is ready!"
+            break
+          fi
+          RETRY=$$((RETRY + 1))
+          echo "Schema not ready yet, waiting... ($$RETRY/$$MAX_RETRIES)"
+          sleep 3
+        done
+
+        if [ $$RETRY -eq $$MAX_RETRIES ]; then
+          echo "Timeout waiting for schema. Admin-service may not be running."
+          exit 1
+        fi
+
+        # Check if menus table has data (indicator that seed was already run)
+        COUNT=$$(psql -h postgres -U postgres -d gwa -t -c "SELECT COUNT(*) FROM sys_menus;" 2>/dev/null | tr -d ' ')
+
+        if [ "$$COUNT" = "0" ] || [ -z "$$COUNT" ]; then
+          echo "Seeding database with default data..."
+          if psql -h postgres -U postgres -d gwa -f /sql/postgresql-default-data.sql; then
+            echo "Database seeded successfully!"
+          else
+            echo "ERROR: Database seeding failed!"
+            exit 1
+          fi
+        else
+          echo "Database already has $$COUNT menu records, skipping seed."
+        fi
+        exit 0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # lcm-init removed in registration-rework Phase 1 — every module
+  # (including admin-service) now self-bootstraps via cert.Ensure()
+  # against lcm-service:9101. The shared lcm-data:/app/lcm-certs
+  # mount on modules is gone too; lcm-data is only used by lcm-service
+  # itself for its own CA storage.
+
+  # Init container to bootstrap Vault AppRole for Warden
+  vault-init:
+    image: hashicorp/vault:1.15
+    restart: "no"
+    networks:
+      - app-tier
+    environment:
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=dev-token
+    volumes:
+      - vault-credentials:/vault-credentials
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Initializing Vault at $${VAULT_ADDR}..."
+
+        # Wait for Vault to be ready
+        MAX_RETRIES=60
+        RETRY=0
+        until vault status >/dev/null 2>&1; do
+            RETRY=$$((RETRY + 1))
+            if [ $$RETRY -ge $$MAX_RETRIES ]; then
+                echo "ERROR: Vault not ready after $${MAX_RETRIES} attempts"
+                exit 1
+            fi
+            echo "Waiting for Vault... ($${RETRY}/$${MAX_RETRIES})"
+            sleep 2
+        done
+        echo "Vault is ready!"
+
+        # Enable KV v2 secrets engine
+        echo "Enabling KV v2 secrets engine..."
+        vault secrets enable -path=secret -version=2 kv 2>/dev/null || echo "KV secrets engine already enabled"
+
+        # Create policy for Warden service
+        echo "Creating Warden policy..."
+        vault policy write warden - <<'POLICY'
+        path "secret/data/warden/*" {
+          capabilities = ["create", "read", "update", "delete", "list"]
+        }
+        path "secret/metadata/warden/*" {
+          capabilities = ["read", "delete", "list"]
+        }
+        path "secret/destroy/warden/*" {
+          capabilities = ["update"]
+        }
+        path "secret/undelete/warden/*" {
+          capabilities = ["update"]
+        }
+        POLICY
+
+        # Enable AppRole authentication
+        echo "Enabling AppRole authentication..."
+        vault auth enable approle 2>/dev/null || echo "AppRole auth already enabled"
+
+        # Create AppRole for Warden
+        echo "Creating Warden AppRole..."
+        vault write auth/approle/role/warden \
+            token_policies="warden" \
+            token_ttl=1h \
+            token_max_ttl=4h \
+            secret_id_ttl=0 \
+            secret_id_num_uses=0
+
+        # Get credentials
+        ROLE_ID=$$(vault read -field=role_id auth/approle/role/warden/role-id)
+        SECRET_ID=$$(vault write -field=secret_id -force auth/approle/role/warden/secret-id)
+
+        # Save to shared volume (warden runs as uid 1000)
+        mkdir -p /vault-credentials
+        printf '%s' "$$ROLE_ID" > /vault-credentials/role_id
+        printf '%s' "$$SECRET_ID" > /vault-credentials/secret_id
+        chmod 644 /vault-credentials/role_id /vault-credentials/secret_id
+        chown 1000:1000 /vault-credentials/role_id /vault-credentials/secret_id 2>/dev/null || true
+
+        echo "============================================"
+        echo "Vault initialization complete!"
+        echo "ROLE_ID=$$ROLE_ID"
+        echo "SECRET_ID=$$SECRET_ID"
+        echo "============================================"
+    depends_on:
+      vault:
+        condition: service_healthy
+
+  admin-service:
+    build:
+      context: ../go-tangra-portal
+      dockerfile: app/admin/service/Dockerfile
+      # Sibling go-tangra-common is COPY'd into the build via this
+      # named context so the temporary `replace ../go-tangra-common`
+      # in portal's go.mod resolves inside the build sandbox.
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/admin-service:latest
+    restart: always
+    ports:
+      - "7788:7788"
+      - "7789:7789"
+      - "7787:7787"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      # admin-service self-bootstraps via cert.Ensure() against
+      # lcm-service:9101. The transcoder dials every module over
+      # mTLS using the client cert under /app/certs/client/.
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up admin-service}
+      # admin-service IS the registration target — no need to dial
+      # itself for registration, but keep this set so any future
+      # heuristic-based cert pickup short-circuits to insecure.
+      - REGISTRATION_INSECURE=1
+      # The per-module env vars below all share the same client cert
+      # at /app/certs/client/client.crt (single admin identity for
+      # outbound mTLS to every module).
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      - LCM_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - LCM_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - LCM_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - LCM_SERVER_NAME=lcm-server
+      - DEPLOYER_GRPC_ENDPOINT=deployer-service:9200
+      - DEPLOYER_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - DEPLOYER_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - DEPLOYER_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - DEPLOYER_SERVER_NAME=deployer-service
+      - WARDEN_GRPC_ENDPOINT=warden-service:9300
+      - WARDEN_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - WARDEN_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - WARDEN_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - WARDEN_SERVER_NAME=warden-service
+      - IPAM_GRPC_ENDPOINT=ipam-service:9400
+      - IPAM_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - IPAM_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - IPAM_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - IPAM_SERVER_NAME=ipam-service
+      - PAPERLESS_GRPC_ENDPOINT=paperless-service:9500
+      - PAPERLESS_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - PAPERLESS_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - PAPERLESS_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - PAPERLESS_SERVER_NAME=paperless-service
+      - SCHEDULER_GRPC_ENDPOINT=scheduler-service:10500
+      - SCHEDULER_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - SCHEDULER_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - SCHEDULER_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - SCHEDULER_SERVER_NAME=scheduler-service
+      - ASTERISK_GRPC_ENDPOINT=asterisk-service:9800
+      - ASTERISK_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - ASTERISK_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - ASTERISK_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - ASTERISK_SERVER_NAME=asterisk-service
+      # SMS Gateway: the transcoder uppercases the module id
+      # ("sms-gw" → "SMS-GW") to look up the legacy per-module env
+      # vars. Docker preserves the literal env-var names (Go's
+      # os.Getenv reads them fine even though bash can't reference
+      # variables with hyphens in the name).
+      - SMS-GW_GRPC_ENDPOINT=sms-gw-service:9900
+      - SMS-GW_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - SMS-GW_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - SMS-GW_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - SMS-GW_SERVER_NAME=sms-gw-service
+    volumes:
+      - ./configs/admin:/app/configs:ro
+      - admin-data:/app/data
+      - admin-certs:/app/certs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7788/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # No more lcm-init dependency — admin-service self-bootstraps
+      # against lcm-service:9101 directly.
+      lcm-service:
+        condition: service_started
+
+  lcm-service:
+    build:
+      # lcm now lives in the standalone go-tangra-lcm repo (the
+      # portal's app/lcm directory was removed when the module split
+      # out). registration-rework Phase 0 added the bootstrap port
+      # + SignModuleCertificate RPC on this branch.
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+      # See lcm-init above for the rationale on the named context.
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/lcm-service:latest
+    restart: always
+    ports:
+      - "8000:8000"
+      - "9100:9100"
+      # New bootstrap port (Phase 0 of the registration rework).
+      # Plain TLS, no client-cert verification — modules dial it
+      # before they have a cert. Auth is per-RPC via the shared
+      # MODULE_BOOTSTRAP_SECRET. lcm-init keeps working unchanged
+      # for now; this is purely additive.
+      - "9101:9101"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      # Routable addr admin's gateway uses to dial this module. Without
+      # it, the module registers at 0.0.0.0:port (its bind addr), which
+      # from inside admin's container resolves to admin's own loopback
+      # → all gateway-routed calls 504. See registration-rework PR.
+      - GRPC_ADVERTISE_ADDR=lcm-service:9100
+      # admin proxies /modules/lcm/* here for the federated frontend.
+      # HTTP is on 8000 (LCM_HTTP_ADDR override below) because the
+      # binary defaults to 9101 which collides with the bootstrap port.
+      - HTTP_ADVERTISE_ADDR=lcm-service:8000
+      - FRONTEND_ENTRY_URL=/modules/lcm/remoteEntry.js
+      # Bootstrap-server listen address (registration-rework Phase 0).
+      # Defaults to 0.0.0.0:9101 in the binary; setting it explicitly
+      # so the override is visible at the compose level.
+      - LCM_BOOTSTRAP_ADDR=0.0.0.0:9101
+      # NB: the LCM HTTP server's default in code is ALSO :9101, so we
+      # must override it explicitly — otherwise it collides with the
+      # bootstrap gRPC server above. 8000 matches the host mapping.
+      - LCM_HTTP_ADDR=0.0.0.0:8000
+    volumes:
+      - ./configs/lcm:/app/configs:ro
+      - lcm-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  deployer-service:
+    build:
+      # deployer now lives in the standalone go-tangra-deployer repo (the
+      # portal's app/deployer directory was removed when the module
+      # split out).
+      context: ../go-tangra-deployer
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/deployer-service:latest
+    restart: always
+    ports:
+      - "9200:9200"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - LCM_GRPC_ENDPOINT=lcm-service:9100
+      # Outbound mTLS to lcm:9100 reuses the certs cert.Ensure
+      # provisions for inbound mTLS (same CA, same identity).
+      - LCM_CA_CERT_PATH=/app/certs/ca/ca.crt
+      - LCM_CLIENT_CERT_PATH=/app/certs/client/client.crt
+      - LCM_CLIENT_KEY_PATH=/app/certs/client/client.key
+      - ADMIN_GRPC_ENDPOINT
+      - GRPC_ADVERTISE_ADDR=deployer-service:9200
+      - HTTP_ADVERTISE_ADDR=deployer-service:9201
+      - FRONTEND_ENTRY_URL=/modules/deployer/remoteEntry.js
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up deployer-service}
+      - REGISTRATION_INSECURE=1
+    volumes:
+      - ./configs/deployer:/app/configs:ro
+      - deployer-data:/app/data
+      - deployer-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  warden-service:
+    build:
+      # warden now lives in the standalone go-tangra-warden repo (the
+      # portal's app/warden directory was removed when the module
+      # split out).
+      context: ../go-tangra-warden
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/warden-service:latest
+    restart: always
+    ports:
+      - "9300:9300"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_ROLE_ID_FILE=/vault-credentials/role_id
+      - VAULT_SECRET_ID_FILE=/vault-credentials/secret_id
+      - ADMIN_GRPC_ENDPOINT
+      - GRPC_ADVERTISE_ADDR=warden-service:9300
+      - HTTP_ADVERTISE_ADDR=warden-service:9301
+      - FRONTEND_ENTRY_URL=/modules/warden/remoteEntry.js
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      # Self-bootstraps via cert.Ensure() against lcm-service:9101.
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up warden-service}
+      - REGISTRATION_INSECURE=1
+    volumes:
+      - ./configs/warden:/app/configs:ro
+      - vault-credentials:/vault-credentials:ro
+      - warden-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  ipam-service:
+    build:
+      # ipam now lives in the standalone go-tangra-ipam repo (the
+      # portal's app/ipam directory was removed when the module
+      # split out).
+      context: ../go-tangra-ipam
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/ipam-service:latest
+    restart: always
+    ports:
+      - "9400:9400"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GRPC_ADVERTISE_ADDR=ipam-service:9400
+      - HTTP_ADVERTISE_ADDR=ipam-service:9401
+      - FRONTEND_ENTRY_URL=/modules/ipam/remoteEntry.js
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up ipam-service}
+      - REGISTRATION_INSECURE=1
+    volumes:
+      - ./configs/ipam:/app/configs:ro
+      - ipam-data:/app/data
+      - ipam-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  paperless-service:
+    build:
+      # paperless now lives in the standalone go-tangra-paperless repo (the
+      # portal's app/paperless directory was removed when the module
+      # split out).
+      context: ../go-tangra-paperless
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/paperless-service:latest
+    restart: always
+    ports:
+      - "9500:9500"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GRPC_ADVERTISE_ADDR=paperless-service:9500
+      - HTTP_ADVERTISE_ADDR=paperless-service:9501
+      - FRONTEND_ENTRY_URL=/modules/paperless/remoteEntry.js
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up paperless-service}
+      - REGISTRATION_INSECURE=1
+    volumes:
+      - ./configs/paperless:/app/configs:ro
+      - paperless-data:/app/data
+      - paperless-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  asterisk-service:
+    build:
+      context: ../go-tangra-asterisk
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/asterisk-service:latest
+    restart: always
+    ports:
+      - "9800:9800"
+      - "9801:9801"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up asterisk-service}
+      - REGISTRATION_INSECURE=1
+      # Prometheus URL for the in-app dashboard. Empty → asterisk's
+      # InstantQuery RPC returns 503 PROMETHEUS_DISABLED and the
+      # dashboard panels render empty / "not configured" state.
+      - ASTERISK_PROMETHEUS_URL=${PROMETHEUS_URL}
+      # MySQL DSNs override configs/data.yaml. Container hostname `percona`.
+      - ASTERISK_CDR_DSN=root:${POSTGRES_PASSWORD}@tcp(percona:3306)/asteriskcdrdb?parseTime=true&loc=UTC
+      - ASTERISK_CONFIG_DSN=root:${POSTGRES_PASSWORD}@tcp(percona:3306)/asterisk?parseTime=true&loc=UTC
+      # Tangra-owned database for the PJSIP registration event log. The
+      # module auto-creates the table; the DB itself must already exist
+      # (CREATE DATABASE tangra_asterisk;).
+      - ASTERISK_TANGRA_DSN=root:${POSTGRES_PASSWORD}@tcp(percona:3306)/tangra_asterisk?parseTime=true&loc=UTC
+      # AMI listener: subscribes to ContactStatus events to track each
+      # extension's registration state. Leave ASTERISK_AMI_HOST blank to
+      # disable; otherwise create a manager.conf user with `read=system`.
+      - ASTERISK_AMI_HOST=
+      - ASTERISK_AMI_PORT=5038
+      - ASTERISK_AMI_USERNAME=tangra
+      - ASTERISK_AMI_SECRET=
+      # Routable address admin-service uses to dial this module's gRPC.
+      # The bind address (server.grpc.addr) stays 0.0.0.0:9800 to listen on all interfaces.
+      - GRPC_ADVERTISE_ADDR=asterisk-service:9800
+      # Frontend (Module Federation remote served by the embedded HTTP server)
+      - ASTERISK_HTTP_ADDR=0.0.0.0:9801
+      - HTTP_ADVERTISE_ADDR=asterisk-service:9801
+      - FRONTEND_ENTRY_URL=/modules/asterisk/remoteEntry.js
+      # Path inside the container where FreePBX call recordings live. The
+      # streaming endpoint resolves files under this base; the volume mount
+      # below makes them available read-only.
+      - ASTERISK_RECORDINGS_PATH=/var/spool/asterisk/monitor
+    volumes:
+      - ./configs/asterisk:/app/configs:ro
+      - asterisk-certs:/app/certs
+      # Bind the FreePBX recordings directory in here (read-only). The host
+      # path defaults to /var/spool/asterisk/monitor — override with the
+      # ASTERISK_RECORDINGS_HOST_PATH env var when running compose if your
+      # FreePBX deployment uses a different layout.
+      - ${ASTERISK_RECORDINGS_HOST_PATH:-/var/spool/asterisk/monitor}:/var/spool/asterisk/monitor:ro
+    depends_on:
+      percona:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  # ===========================================
+  # SMS Gateway module + its dedicated database
+  # ===========================================
+
+  # Idempotent CREATE DATABASE for the sms-gw module. Runs once per
+  # `docker compose up` cycle; exits 0 whether the DB existed or was
+  # just created. The module's Ent migrations create the schema on
+  # first startup.
+  sms-gw-db-init:
+    image: docker.io/timescale/timescaledb:latest-pg15
+    restart: "no"
+    networks:
+      - app-tier
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until pg_isready -h postgres -U postgres; do
+          echo "waiting for postgres..."; sleep 2;
+        done
+        psql -h postgres -U postgres -d postgres -f /sql/sms-gw-init.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Mock LinkMobility/Voicecom provider for e2e tests. Bound to
+  # :18080 on the host so the e2e suite (running on the host) can
+  # hit /debug/inbox and /debug/dlr. Inside the network, sms-gw
+  # reaches it as test-linkmobility:8080.
+  test-linkmobility:
+    build:
+      context: ../go-tangra-sms-gw
+      dockerfile: Dockerfile.test-linkmobility
+    image: menta2l/test-linkmobility:latest
+    restart: always
+    ports:
+      - "18080:8080"
+    networks:
+      - app-tier
+    command: ["--addr=:8080", "--dlr-delay=200ms"]
+
+  sms-gw-service:
+    build:
+      context: ../go-tangra-sms-gw
+      dockerfile: Dockerfile
+      # Sibling go-tangra-common is COPY'd into the build via this
+      # named context so the temporary `replace ../go-tangra-common`
+      # in sms-gw's go.mod resolves inside the build sandbox.
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/sms-gw-service:latest
+    restart: always
+    ports:
+      - "9900:9900"
+      - "9901:9901"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      # The module self-bootstraps via cert.Ensure() on every boot.
+      # No SMSGW_*_CERT_PATH triplet, no shared lcm-data mount —
+      # the certs are generated locally (private key never crosses
+      # the wire), signed by LCM:9101, and persisted into the
+      # private sms-gw-certs volume below.
+      #
+      # LCM_CA_FINGERPRINT pins the LCM root CA at TLS handshake
+      # time — a missing pin is a fatal config error (no TOFU). On
+      # a fresh stack: `make lcm-bootstrap` brings lcm-service up
+      # and writes the pin to .env automatically; subsequent runs
+      # interpolate from there.
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up sms-gw-service}
+      # admin-service:7787 is plain gRPC (no TLS). Without this
+      # override, common's loadAdminClientTLS auto-detects our new
+      # client/client.crt and tries mTLS — which hangs forever
+      # against a plain-text server. Replaces the legacy "point
+      # CERTS_DIR at a non-existent path" workaround with an
+      # explicit, documented escape hatch.
+      - REGISTRATION_INSECURE=1
+      # Routable address admin-service uses to dial this module's gRPC.
+      # The bind address (server.grpc.addr) stays 0.0.0.0:9900 to listen
+      # on all interfaces.
+      - GRPC_ADVERTISE_ADDR=sms-gw-service:9900
+      # Public HTTP server (legacy /hermes/v1/sms* contract).
+      - HTTP_PUBLIC_BIND=0.0.0.0:9901
+      - HTTP_ADVERTISE_ADDR=sms-gw-service:9901
+      - FRONTEND_ENTRY_URL=/modules/sms-gw/remoteEntry.js
+      # Havi-format JWT secret for SMS API clients on the public path.
+      # MUST be at least 32 bytes — NewIssuer rejects shorter secrets at
+      # boot. Override SMS_GW_JWT_SECRET in your local env to rotate.
+      - SMS_GW_JWT_SECRET
+      - SMS_GW_ACCESS_TTL_SECONDS=7200
+      - SMS_GW_REFRESH_TTL_SECONDS=604800
+      # Trusted-proxy CIDRs for X-Forwarded-For / X-Real-IP. The compose
+      # network sits behind nginx (frontend container) — so trust the
+      # docker-default bridge range plus link-local fallback. In real
+      # deployments, set this to the actual ingress IP range.
+      - TRUSTED_PROXY_CIDRS=172.16.0.0/12,10.0.0.0/8,192.168.0.0/16
+      # Local-dev escape hatch: webhook URLs may be plain http://. Drop
+      # this in production.
+      - SMS_GW_ALLOW_HTTP_WEBHOOKS=1
+      # Relaxed rate limits for the dev/e2e environment. Production
+      # should keep the conservative defaults baked into the binary.
+      - SMS_GW_LOGIN_RPM=600
+      - SMS_GW_LOGIN_BURST=100
+      - SMS_GW_SEND_RPM=6000
+      - SMS_GW_SEND_BURST=200
+      # Prometheus URL for the in-app dashboard. Empty => the
+      # dashboard RPC returns 503 PROMETHEUS_DISABLED and the panels
+      # show the not-configured state.
+      - SMS_GW_PROMETHEUS_URL=${PROMETHEUS_URL}
+    volumes:
+      - ./configs/sms-gw:/app/configs:ro
+      # Per-service private cert directory. Replaces the shared
+      # lcm-data:ro mount — sms-gw owns its own cert state now and
+      # cert.Ensure() rewrites it whenever the cert is missing or
+      # close to expiry.
+      - sms-gw-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      sms-gw-db-init:
+        condition: service_completed_successfully
+      # No more lcm-init dependency — sms-gw bootstraps its own
+      # certs against lcm-service:9101 directly. Just needs lcm
+      # to be reachable.
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  scheduler-service:
+    build:
+      context: ../go-tangra-scheduler
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/scheduler-service:latest
+    restart: always
+    ports:
+      - "10500:10500"
+      - "10501:10501"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GRPC_ADVERTISE_ADDR=scheduler-service:10500
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up scheduler-service}
+      - REGISTRATION_INSECURE=1
+      - FRONTEND_ENTRY_URL=/modules/scheduler/remoteEntry.js
+      - HTTP_ADVERTISE_ADDR=scheduler-service:10501
+    volumes:
+      - ./configs/scheduler:/app/configs:ro
+      - scheduler-data:/app/data
+      - scheduler-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  # ===========================================
+  # Infrastructure Services
+  # ===========================================
+
+  vault:
+    image: hashicorp/vault:1.15
+    restart: always
+    ports:
+      - "8200:8200"
+    networks:
+      - app-tier
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_ADDR=http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  postgres:
+    image: docker.io/timescale/timescaledb:latest-pg15
+    restart: always
+    ports:
+      - "5432:5432"
+    networks:
+      - app-tier
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=gwa
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+#  mysql:
+#    image: docker.io/bitnami/mariadb:latest
+#    restart: always
+#    ports:
+#      - "3306:3306"
+#    networks:
+#      - app-tier
+#    environment:
+#      - MARIADB_ROOT_PASSWORD=${POSTGRES_PASSWORD}
+#      - MARIADB_USER=admin
+#      - MARIADB_PASSWORD=${POSTGRES_PASSWORD}
+#      - MARIADB_DATABASE=gwa
+#      - ALLOW_EMPTY_PASSWORD=yes
+#      - TZ=Asia/Shanghai
+
+  percona:
+    image: docker.io/percona/percona-server:8.0
+    restart: always
+    ports:
+      - "3306:3306"
+    networks:
+      - app-tier
+    environment:
+      - MYSQL_ROOT_PASSWORD=${POSTGRES_PASSWORD}
+      - MYSQL_USER=admin
+      - MYSQL_PASSWORD=${POSTGRES_PASSWORD}
+      - MYSQL_DATABASE=gwa
+      - TZ
+    volumes:
+      - percona-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${POSTGRES_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: docker.io/bitnami/redis:latest
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - app-tier
+    environment:
+      - ALLOW_EMPTY_PASSWORD=no
+      - REDIS_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_AOF_ENABLED=no
+      - REDIS_IO_THREADS_DO_READS=yes
+      - REDIS_DISABLE_COMMANDS=FLUSHDB,FLUSHALL,CONFIG
+    volumes:
+      - redis-data:/bitnami/redis/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${POSTGRES_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: rustfs
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - app-tier
+    environment:
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_CONSOLE_ADDRESS=:9001
+      - RUSTFS_CORS_ALLOWED_ORIGINS=*
+      - RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS=*
+    volumes:
+      - rustfs-data:/data
+
+#  consul:
+#    image: docker.io/bitnami/consul:latest
+#    restart: always
+#    ports:
+#      - '8300:8300'
+#      - '8301:8301'
+#      - '8301:8301/udp'
+#      - '8500:8500'
+#      - '8600:8600'
+#      - '8600:8600/udp'
+#    networks:
+#      - app-tier
+#    environment:
+#      - CONSUL_BIND_INTERFACE='eth0'
+#      - CONSUL_AGENT_MODE=server
+#      - CONSUL_ENABLE_UI=true
+#      - CONSUL_BOOTSTRAP_EXPECT=1
+#      - CONSUL_CLIENT_LAN_ADDRESS=0.0.0.0
+#      - CONSUL_BIND_ADDR=0.0.0.0
+#      - CONSUL_DISABLE_KEYRING_FILE=true
+#      - CONSUL_NODE_NAME=consul
+
+#  etcd:
+#    image: docker.io/bitnami/etcd:latest
+#    restart: always
+#    ports:
+#      - "2379:2379"
+#      - "2380:2380"
+#    networks:
+#      - app-tier
+#    environment:
+#      - ETCDCTL_API=3
+#      - ALLOW_NONE_AUTHENTICATION=yes
+#      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+
+#  jaeger:
+#    image: docker.io/jaegertracing/all-in-one:latest
+#    restart: always
+#    ports:
+#      - "6831:6831/udp"
+#      - "5778:5778"
+#      - "4317:4317"
+#      - "4318:4318"
+#      - "16686:16686"
+#      - "14250:14250"
+#      - "14268:14268"
+#      - "14269:14269"
+#    networks:
+#      - app-tier
+#    environment:
+#      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+#      - COLLECTOR_OTLP_ENABLED=true
+
+  # ===========================================
+  # Observability: Prometheus + Grafana
+  # ===========================================
+  # Prometheus scrapes /metrics from sms-gw-service:9901 and any other
+  # tangra modules that expose Prometheus metrics. The dashboard for
+  # the SMS gateway is auto-provisioned in Grafana under the "Tangra"
+  # folder.
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    networks:
+      - app-tier
+    volumes:
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-lifecycle
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    networks:
+      - app-tier
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_LOG_LEVEL=warn
+    volumes:
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # ---------------------------------------------
+  # registration-rework Phase 1 modules — added together so the
+  # hr→notification mTLS edge case is exercisable end-to-end.
+  # Each one self-bootstraps its certs against lcm-service:9101 and
+  # owns a private *-certs named volume for them.
+  # ---------------------------------------------
+
+  notification-service:
+    build:
+      context: ../go-tangra-notification
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/notification-service:latest
+    restart: always
+    ports:
+      - "10300:10300"
+      - "10302:10302"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up notification-service}
+      - REGISTRATION_INSECURE=1
+      # Routable address admin-service uses to dial this module's gRPC.
+      # Bind addr stays 0.0.0.0:10300 (server.yaml).
+      - GRPC_ADVERTISE_ADDR=notification-service:10300
+      # The source defaults NOTIFICATION_HTTP_ADDR to 127.0.0.1:10301
+      # which only listens on loopback inside the container — so admin's
+      # frontend proxy cannot reach it. Force the bind onto 0.0.0.0.
+      - NOTIFICATION_HTTP_ADDR=0.0.0.0:10301
+      - HTTP_ADVERTISE_ADDR=notification-service:10301
+      - FRONTEND_ENTRY_URL=/modules/notification/remoteEntry.js
+    volumes:
+      - ./configs/notification:/app/configs:ro
+      - notification-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  hr-service:
+    build:
+      context: ../go-tangra-hr
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/hr-service:latest
+    restart: always
+    ports:
+      - "10200:10200"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      # === Certificate bootstrap (registration-rework Phase 1) ===
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up hr-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=hr-service:10200
+      # admin proxies /modules/hr/* to this httpEndpoint to fetch the
+      # federated frontend bundle (remoteEntry.js etc.). Without these
+      # two vars the registration carries empty fields and the SPA
+      # logs "Component view not found" for every hr route.
+      - HTTP_ADVERTISE_ADDR=hr-service:10201
+      - FRONTEND_ENTRY_URL=/modules/hr/remoteEntry.js
+      # hr's leave_notification.go calls notification via the common
+      # ModuleDialer; the dialer asks admin-service for the registered
+      # endpoint of "notification" and dials it over mTLS using the
+      # client cert that cert.Ensure produced. No NOTIFICATION_GRPC_*
+      # env vars needed here.
+    volumes:
+      - ./configs/hr:/app/configs:ro
+      - hr-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+      # Soft dep — hr can boot without notification, the client only
+      # resolves on first use. We list it here so `up` brings them up
+      # together for testing.
+      notification-service:
+        condition: service_started
+
+  backup-service:
+    build:
+      context: ../go-tangra-backup
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/backup-service:latest
+    restart: always
+    ports:
+      - "10100:10100"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up backup-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=backup-service:10100
+      - HTTP_ADVERTISE_ADDR=backup-service:10101
+      - FRONTEND_ENTRY_URL=/modules/backup/remoteEntry.js
+    volumes:
+      - ./configs/backup:/app/configs:ro
+      - backup-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  sharing-service:
+    build:
+      context: ../go-tangra-sharing
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/sharing-service:latest
+    restart: always
+    ports:
+      - "9600:9600"
+      - "9601:9601"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up sharing-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=sharing-service:9600
+      - HTTP_ADVERTISE_ADDR=sharing-service:9601
+      - FRONTEND_ENTRY_URL=/modules/sharing/remoteEntry.js
+      # 64-char hex (256-bit) AES-GCM key for sealed-link payloads.
+      # Override SHARING_ENCRYPTION_KEY in your env to rotate.
+      - SHARING_ENCRYPTION_KEY
+    volumes:
+      - ./configs/sharing:/app/configs:ro
+      - sharing-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  signing-service:
+    build:
+      context: ../go-tangra-signing
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/signing-service:latest
+    restart: always
+    ports:
+      - "10400:10400"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up signing-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=signing-service:10400
+      - HTTP_ADVERTISE_ADDR=signing-service:10401
+      - FRONTEND_ENTRY_URL=/modules/signing/remoteEntry.js
+    volumes:
+      - ./configs/signing:/app/configs:ro
+      - signing-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  # asset-service / executor-service: gRPC ports remapped (asset
+  # 9900→10600 to clear sms-gw, executor 9800→10700 to clear
+  # asterisk). The override happens via the mounted server.yaml in
+  # configs/{asset,executor}/, so the source repos stay untouched.
+  # Their HTTP servers respect ASSET_HTTP_ADDR / EXECUTOR_HTTP_ADDR
+  # env vars too, so we shift those ports along with the gRPC ones.
+
+  asset-service:
+    build:
+      context: ../go-tangra-asset
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/asset-service:latest
+    restart: always
+    ports:
+      - "10600:10600"
+      - "10601:10601"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up asset-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=asset-service:10600
+      - ASSET_HTTP_ADDR=0.0.0.0:10601
+      - HTTP_ADVERTISE_ADDR=asset-service:10601
+      - FRONTEND_ENTRY_URL=/modules/asset/remoteEntry.js
+    volumes:
+      - ./configs/asset:/app/configs:ro
+      - asset-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
+  executor-service:
+    build:
+      context: ../go-tangra-executor
+      dockerfile: Dockerfile
+      additional_contexts:
+        common: ../go-tangra-common
+    image: menta2l/executor-service:latest
+    restart: always
+    ports:
+      - "10700:10700"
+      - "10701:10701"
+    networks:
+      - app-tier
+    environment:
+      - TZ
+      - ADMIN_GRPC_ENDPOINT
+      - GOLANG_PROTOBUF_REGISTRATION_CONFLICT
+      - CERTS_DIR
+      - LCM_BOOTSTRAP_ENDPOINT
+      - MODULE_BOOTSTRAP_SECRET
+      - LCM_CA_FINGERPRINT=${LCM_CA_FINGERPRINT:?run "make lcm-bootstrap" before bringing up executor-service}
+      - REGISTRATION_INSECURE=1
+      - GRPC_ADVERTISE_ADDR=executor-service:10700
+      - EXECUTOR_HTTP_ADDR=0.0.0.0:10701
+      - HTTP_ADVERTISE_ADDR=executor-service:10701
+      - FRONTEND_ENTRY_URL=/modules/executor/remoteEntry.js
+    volumes:
+      - ./configs/executor:/app/configs:ro
+      - executor-certs:/app/certs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lcm-service:
+        condition: service_started
+      admin-service:
+        condition: service_healthy
+
