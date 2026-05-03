@@ -4,36 +4,23 @@ default_validity_days: 365
 auto_approve_certificates: true  # Set to true for automatic approval (like Puppet auto-signing)
 auto_generate_ca: true  # Automatically generate self-signed CA if not exists
 shared_secret: "changeme"  # Global shared secret for certificate requests
+# Bootstrap secret used by the new SignModuleCertificate RPC on
+# :9101. Modules read the same value from MODULE_BOOTSTRAP_SECRET in
+# their environment and submit it on every signing call. Phase 0 of
+# the registration rework — the legacy lcm-init/BootstrapCertificates
+# flow continues to work alongside this.
+module_registration_secret: "changeme-bootstrap-secret"
 ca_cert_path: "/app/data/ca/ca.crt"  # Path to CA certificate
 ca_key_path: "/app/data/ca/ca.key"   # Path to CA private key
 
-# Module certificate bootstrap
-bootstrap_modules:
-  - module_id: deployer
-    client_id: lcm-deployer
-    cert_dir: deployer
-    server_cert_dir: deployer-server
-    display_name: LCM Deployer
-  - module_id: warden
-    client_id: lcm-warden
-    cert_dir: warden
-    server_cert_dir: warden-server
-    display_name: LCM Warden
-  - module_id: ipam
-    client_id: lcm-ipam
-    cert_dir: ipam
-    server_cert_dir: ipam-server
-    display_name: LCM IPAM
-  - module_id: paperless
-    client_id: lcm-paperless
-    cert_dir: paperless
-    server_cert_dir: paperless-server
-    display_name: LCM Paperless
-  - module_id: scheduler
-    client_id: lcm-scheduler
-    cert_dir: scheduler
-    server_cert_dir: scheduler-server
-    display_name: LCM Scheduler
+# Module certificate bootstrap.
+#
+# Empty intentionally: every module now self-bootstraps via
+# SignModuleCertificate on lcm-service:9101 (registration-rework
+# Phase 1+ rollout complete). Entries in this list cause LCM to
+# mint certs eagerly on its own startup — no migrated module needs
+# that anymore.
+bootstrap_modules: []
 
 # Event notification configuration (Redis pub/sub)
 events:

@@ -1,0 +1,12 @@
+server:
+  grpc:
+    # Reassigned 9900 → 10600 to avoid collision with sms-gw which
+    # already owns 9900 in this compose stack.
+    addr: "0.0.0.0:10600"
+    timeout: 10s
+    middleware:
+      enable_logging: true
+      enable_recovery: true
+      enable_tracing: false
+      enable_validate: true
+      enable_metadata: true

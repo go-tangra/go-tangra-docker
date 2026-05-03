@@ -1,0 +1,11 @@
+data:
+  database:
+    # Ent expects "postgres" as the driver string ("postgresql" is rejected).
+    # The DSN itself uses the postgresql:// scheme.
+    driver: postgres
+    source: postgresql://postgres:*Abcd123456@postgres:5432/sms_gw?sslmode=disable
+    migrate: true
+    max_idle: 10
+    max_open: 100
+    max_lifetime: 3600s
+    debug: false

@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: tangra-dev
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # The sms-gw service exposes /metrics on its public HTTP port (9901).
+  # The endpoint is intentionally unauthenticated (Prometheus scrapes
+  # don't carry user credentials) and protected at the network layer —
+  # it is only reachable from inside the docker app-tier network.
+  - job_name: sms-gw
+    metrics_path: /metrics
+    scrape_interval: 10s
+    static_configs:
+      - targets:
+          - sms-gw-service:9901
+        labels:
+          service: sms-gw
+          instance: sms-gw-service
