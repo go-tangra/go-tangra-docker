@@ -2,8 +2,17 @@ oss:
   minio:
     endpoint: "rustfs:9000"
     upload_host: "rustfs:9000"
+    # download_host is rendered into pre-signed URLs the browser
+    # follows directly, so it must be reachable from the user's
+    # browser — not from inside this container. With nginx fronting,
+    # use the public host or leave it as-is if you only ever stream
+    # downloads through admin's /images and /files proxies.
     download_host: "http://localhost:9000"
     access_key: "rustfsadmin"
-    secret_key: "*rustfsadmin"
+    # No leading "*" — that prefix was a copy-paste typo from the
+    # postgres password convention. RustFS rejects the AWS-SigV4
+    # signature with "request signature does not match" if any
+    # extra char ends up in the key.
+    secret_key: "rustfsadmin"
     token: ""
     use_ssl: false
