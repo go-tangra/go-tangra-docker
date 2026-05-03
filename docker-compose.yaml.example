@@ -44,9 +44,6 @@ services:
   # ===========================================
 
   frontend:
-    build:
-      context: ../go-tangra-frontend
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-frontend:${IMAGE_TAG}
     restart: always
     ports:
@@ -226,9 +223,6 @@ services:
         condition: service_healthy
 
   admin-service:
-    build:
-      context: ../go-tangra-portal
-      dockerfile: app/admin/service/Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-portal:${IMAGE_TAG}
     restart: always
     ports:
@@ -320,13 +314,6 @@ services:
         condition: service_started
 
   lcm-service:
-    build:
-      # lcm now lives in the standalone go-tangra-lcm repo (the
-      # portal's app/lcm directory was removed when the module split
-      # out). registration-rework Phase 0 added the bootstrap port
-      # + SignModuleCertificate RPC on this branch.
-      context: ../go-tangra-lcm
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-lcm:${IMAGE_TAG}
     restart: always
     ports:
@@ -371,12 +358,6 @@ services:
         condition: service_healthy
 
   deployer-service:
-    build:
-      # deployer now lives in the standalone go-tangra-deployer repo (the
-      # portal's app/deployer directory was removed when the module
-      # split out).
-      context: ../go-tangra-deployer
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-deployer:${IMAGE_TAG}
     restart: always
     ports:
@@ -416,12 +397,6 @@ services:
         condition: service_healthy
 
   warden-service:
-    build:
-      # warden now lives in the standalone go-tangra-warden repo (the
-      # portal's app/warden directory was removed when the module
-      # split out).
-      context: ../go-tangra-warden
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-warden:${IMAGE_TAG}
     restart: always
     ports:
@@ -462,12 +437,6 @@ services:
         condition: service_healthy
 
   ipam-service:
-    build:
-      # ipam now lives in the standalone go-tangra-ipam repo (the
-      # portal's app/ipam directory was removed when the module
-      # split out).
-      context: ../go-tangra-ipam
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-ipam:${IMAGE_TAG}
     restart: always
     ports:
@@ -501,12 +470,6 @@ services:
         condition: service_healthy
 
   paperless-service:
-    build:
-      # paperless now lives in the standalone go-tangra-paperless repo (the
-      # portal's app/paperless directory was removed when the module
-      # split out).
-      context: ../go-tangra-paperless
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-paperless:${IMAGE_TAG}
     restart: always
     ports:
@@ -542,9 +505,6 @@ services:
         condition: service_healthy
 
   asterisk-service:
-    build:
-      context: ../go-tangra-asterisk
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-asterisk:${IMAGE_TAG}
     restart: always
     ports:
@@ -639,9 +599,6 @@ services:
   # hit /debug/inbox and /debug/dlr. Inside the network, sms-gw
   # reaches it as test-linkmobility:8080.
   test-linkmobility:
-    build:
-      context: ../go-tangra-sms-gw
-      dockerfile: Dockerfile.test-linkmobility
     image: menta2l/test-linkmobility:latest
     restart: always
     ports:
@@ -651,9 +608,6 @@ services:
     command: ["--addr=:8080", "--dlr-delay=200ms"]
 
   sms-gw-service:
-    build:
-      context: ../go-tangra-sms-gw
-      dockerfile: Dockerfile
     image: menta2l/sms-gw-service:latest
     restart: always
     ports:
@@ -740,9 +694,6 @@ services:
         condition: service_healthy
 
   scheduler-service:
-    build:
-      context: ../go-tangra-scheduler
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-scheduler:${IMAGE_TAG}
     restart: always
     ports:
@@ -1004,9 +955,6 @@ services:
   # ---------------------------------------------
 
   notification-service:
-    build:
-      context: ../go-tangra-notification
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-notification:${IMAGE_TAG}
     restart: always
     ports:
@@ -1045,9 +993,6 @@ services:
         condition: service_healthy
 
   hr-service:
-    build:
-      context: ../go-tangra-hr
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-hr:${IMAGE_TAG}
     restart: always
     ports:
@@ -1093,9 +1038,6 @@ services:
         condition: service_started
 
   backup-service:
-    build:
-      context: ../go-tangra-backup
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-backup:${IMAGE_TAG}
     restart: always
     ports:
@@ -1126,9 +1068,6 @@ services:
         condition: service_healthy
 
   sharing-service:
-    build:
-      context: ../go-tangra-sharing
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-sharing:${IMAGE_TAG}
     restart: always
     ports:
@@ -1163,9 +1102,6 @@ services:
         condition: service_healthy
 
   signing-service:
-    build:
-      context: ../go-tangra-signing
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-signing:${IMAGE_TAG}
     restart: always
     ports:
@@ -1205,9 +1141,6 @@ services:
   # env vars too, so we shift those ports along with the gRPC ones.
 
   asset-service:
-    build:
-      context: ../go-tangra-asset
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-asset:${IMAGE_TAG}
     restart: always
     ports:
@@ -1240,9 +1173,6 @@ services:
         condition: service_healthy
 
   executor-service:
-    build:
-      context: ../go-tangra-executor
-      dockerfile: Dockerfile
     image: ${IMAGE_REGISTRY}/go-tangra-executor:${IMAGE_TAG}
     restart: always
     ports:

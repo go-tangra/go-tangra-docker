@@ -91,6 +91,30 @@ The compose file in this repo wires all of these from `.env`. Copy
 
 ---
 
+## Compose file layout
+
+There are two compose files — copy each `.example` to the unsuffixed name on
+first install (both are gitignored, edits stay local):
+
+| File | Purpose |
+|---|---|
+| `docker-compose.yaml.example` | **Production base.** `image:` only — no `build:`. Pulls every module image from `${IMAGE_REGISTRY}/go-tangra-<module>:${IMAGE_TAG}` (defaults to `ghcr.io/go-tangra` and `3.0.0` from `.env`). |
+| `docker-compose.dev.yaml.example` | **Dev overlay.** Adds `build:` directives so contributors can build module images locally from the sibling `go-tangra-*` repos. Layered on top of the base file. |
+
+For local development:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml build
+docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+```
+
+Or set `COMPOSE_FILE=docker-compose.yaml:docker-compose.dev.yaml` in your
+`.env` so every compose invocation picks up both.
+
+For production deployments, **only the base file is needed** — no sibling
+repos required, just `docker login ghcr.io && docker compose pull && docker
+compose up -d`.
+
 ## Fresh install
 
 ```bash

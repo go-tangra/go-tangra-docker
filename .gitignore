@@ -10,11 +10,11 @@ Thumbs.db
 tmp/
 temp/
 
-# Local-only compose file. Contributors copy docker-compose.yaml.example
-# to docker-compose.yaml and edit for their environment (cert
-# fingerprints, image tags, secrets, port overrides) — keep local edits
-# out of version control.
+# Local-only compose files. Contributors copy *.example to the unsuffixed
+# names and edit for their environment (cert fingerprints, image tags,
+# secrets, port overrides) — keep local edits out of version control.
 docker-compose.yaml
+docker-compose.dev.yaml
 
 # Local environment file with real secrets. Contributors copy .env.example
 # to .env and fill in real values. .env.example stays in git as the

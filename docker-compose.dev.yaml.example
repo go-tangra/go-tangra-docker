@@ -1,0 +1,118 @@
+# Dev overlay — adds `build:` directives so contributors can build module
+# images locally from the sibling go-tangra-* repos. The base file
+# (docker-compose.yaml) only carries `image:` so production deployments,
+# which only have this repo cloned, can `docker compose pull` cleanly.
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml build
+#   docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up -d
+#
+# Or set COMPOSE_FILE in .env so every compose invocation picks up both:
+#   COMPOSE_FILE=docker-compose.yaml:docker-compose.dev.yaml
+
+services:
+  frontend:
+    build:
+      context: ../go-tangra-frontend
+      dockerfile: Dockerfile
+
+  admin-service:
+    build:
+      context: ../go-tangra-portal
+      dockerfile: app/admin/service/Dockerfile
+
+  lcm-service:
+    build:
+      # lcm now lives in the standalone go-tangra-lcm repo (the
+      # portal's app/lcm directory was removed when the module split
+      # out). registration-rework Phase 0 added the bootstrap port
+      # + SignModuleCertificate RPC on this branch.
+      context: ../go-tangra-lcm
+      dockerfile: Dockerfile
+
+  deployer-service:
+    build:
+      # deployer now lives in the standalone go-tangra-deployer repo (the
+      # portal's app/deployer directory was removed when the module
+      # split out).
+      context: ../go-tangra-deployer
+      dockerfile: Dockerfile
+
+  warden-service:
+    build:
+      # warden now lives in the standalone go-tangra-warden repo (the
+      # portal's app/warden directory was removed when the module
+      # split out).
+      context: ../go-tangra-warden
+      dockerfile: Dockerfile
+
+  ipam-service:
+    build:
+      # ipam now lives in the standalone go-tangra-ipam repo (the
+      # portal's app/ipam directory was removed when the module
+      # split out).
+      context: ../go-tangra-ipam
+      dockerfile: Dockerfile
+
+  paperless-service:
+    build:
+      # paperless now lives in the standalone go-tangra-paperless repo (the
+      # portal's app/paperless directory was removed when the module
+      # split out).
+      context: ../go-tangra-paperless
+      dockerfile: Dockerfile
+
+  asterisk-service:
+    build:
+      context: ../go-tangra-asterisk
+      dockerfile: Dockerfile
+
+  test-linkmobility:
+    build:
+      context: ../go-tangra-sms-gw
+      dockerfile: Dockerfile.test-linkmobility
+
+  sms-gw-service:
+    build:
+      context: ../go-tangra-sms-gw
+      dockerfile: Dockerfile
+
+  scheduler-service:
+    build:
+      context: ../go-tangra-scheduler
+      dockerfile: Dockerfile
+
+  notification-service:
+    build:
+      context: ../go-tangra-notification
+      dockerfile: Dockerfile
+
+  hr-service:
+    build:
+      context: ../go-tangra-hr
+      dockerfile: Dockerfile
+
+  backup-service:
+    build:
+      context: ../go-tangra-backup
+      dockerfile: Dockerfile
+
+  sharing-service:
+    build:
+      context: ../go-tangra-sharing
+      dockerfile: Dockerfile
+
+  signing-service:
+    build:
+      context: ../go-tangra-signing
+      dockerfile: Dockerfile
+
+  asset-service:
+    build:
+      context: ../go-tangra-asset
+      dockerfile: Dockerfile
+
+  executor-service:
+    build:
+      context: ../go-tangra-executor
+      dockerfile: Dockerfile
