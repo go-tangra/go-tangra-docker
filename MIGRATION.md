@@ -325,6 +325,88 @@ mixed-version deployments can coexist while you migrate module by module.
 
 ---
 
+## Standalone (systemd) modules
+
+Some modules — currently `asterisk` and `backup` — are deployed in
+production as standalone systemd services on bare-metal hosts rather than in
+docker. The unit files in each module's `deploy/<module>.service` ship the
+cert.Ensure-flavoured environment block. To migrate an existing standalone
+deployment from the legacy lcm-init flow:
+
+### 1. Update the binary
+
+```bash
+# On the bare-metal host:
+systemctl stop tangra-asterisk        # or tangra-backup
+curl -SL https://github.com/go-tangra/go-tangra-asterisk/releases/download/v3.0.0/tangra-asterisk-linux-amd64 \
+  -o /usr/local/bin/tangra-asterisk
+chmod +x /usr/local/bin/tangra-asterisk
+```
+
+### 2. Update the unit file
+
+The shipped unit (`deploy/tangra-asterisk.service` / `tangra-backup.service`)
+adds the new env vars and removes the legacy ones. Copy it over and reload:
+
+```bash
+cp deploy/tangra-asterisk.service /etc/systemd/system/
+systemctl daemon-reload
+```
+
+Key changes vs the legacy unit:
+
+| Old | New | Notes |
+|---|---|---|
+| `MODULE_REGISTRATION_SECRET` | `MODULE_BOOTSTRAP_SECRET` | renamed, same purpose |
+| `<MODULE>_CA_CERT_PATH` etc. (per-module triplet) | `CERTS_DIR=/var/lib/tangra-<module>/certs` | cert.Ensure writes the whole layout under one root |
+| (none) | `LCM_BOOTSTRAP_ENDPOINT=lcm.example.local:9101` | new bootstrap port |
+| (none) | `LCM_CA_FINGERPRINT=<64-hex>` | mandatory CA pin |
+| (none) | `REGISTRATION_INSECURE=1` | admin's :7787 is plaintext now |
+| (none) | `HTTP_ADVERTISE_ADDR`, `FRONTEND_ENTRY_URL` | so admin's gateway can proxy `/modules/<id>/*` |
+
+### 3. Edit `/etc/tangra-<module>/env` with real values
+
+```bash
+cat > /etc/tangra-asterisk/env <<EOF
+ADMIN_GRPC_ENDPOINT=admin.example.local:7787
+LCM_BOOTSTRAP_ENDPOINT=lcm.example.local:9101
+MODULE_BOOTSTRAP_SECRET=<copy from lcm.yaml's module_registration_secret>
+LCM_CA_FINGERPRINT=<64 hex chars — get from \`make lcm-fingerprint\` on the lcm host>
+GRPC_ADVERTISE_ADDR=$(hostname -f):9800
+HTTP_ADVERTISE_ADDR=$(hostname -f):9801
+ASTERISK_CDR_DSN=root:<password>@tcp(127.0.0.1:3306)/asteriskcdrdb?parseTime=true&loc=UTC
+ASTERISK_CONFIG_DSN=root:<password>@tcp(127.0.0.1:3306)/asterisk?parseTime=true&loc=UTC
+EOF
+chmod 600 /etc/tangra-asterisk/env
+```
+
+### 4. Pre-create the writable cert dir
+
+```bash
+mkdir -p /var/lib/tangra-asterisk/certs
+chown <service-user>:<service-user> /var/lib/tangra-asterisk/certs
+```
+
+(`<service-user>` defaults to root if `User=` isn't set in the unit file.)
+
+### 5. Start
+
+```bash
+systemctl start tangra-asterisk
+journalctl -u tangra-asterisk -f | grep cert/ensure
+# Expected:
+#   cert/ensure msg=re-issuing certs for asterisk: missing /var/lib/tangra-asterisk/certs/ca/ca.crt
+#   cert/ensure msg=certs provisioned for asterisk in /var/lib/tangra-asterisk/certs
+#   cert/ensure msg=Server TLS config created with mTLS enabled
+```
+
+### 6. (Cleanup) Remove the legacy lcm-init artifacts
+
+The old unit may have referenced `/etc/tangra-asterisk/certs/{ca.crt,server.crt,server.key}`
+seeded out-of-band by an `scp` from the LCM host. Once cert.Ensure is
+running, those files are stale — `rm` them or leave them, they're not
+read.
+
 ## Restoring the frontend cert from lcm-data
 
 The legacy compose mounted the whole `lcm-data` named volume read-only into
