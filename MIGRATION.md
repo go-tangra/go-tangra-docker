@@ -91,6 +91,35 @@ The compose file in this repo wires all of these from `.env`. Copy
 
 ---
 
+## Prerequisites
+
+Use **Docker Compose v2** — the Go-based plugin invoked as `docker compose`
+(no hyphen). The legacy Python `docker-compose` (v1, last released
+2021-05) crashes on container recreation against any Docker Engine ≥ 25:
+
+```
+KeyError: 'ContainerConfig'
+  File ".../compose/service.py", line 1579, in get_container_data_volumes
+    container.image_config['ContainerConfig'].get('Volumes') or {}
+```
+
+The image-inspect API stopped populating `ContainerConfig` and v1 was
+never updated. Install the plugin:
+
+```bash
+# Debian/Ubuntu
+apt-get install -y docker-compose-plugin
+
+# RHEL/Rocky
+dnf install -y docker-compose-plugin
+
+# Verify
+docker compose version    # → Docker Compose version v2.x
+```
+
+All commands in this document use `docker compose` (v2), not
+`docker-compose` (v1).
+
 ## Compose file layout
 
 There are two compose files — copy each `.example` to the unsuffixed name on
