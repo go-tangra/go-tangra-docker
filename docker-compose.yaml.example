@@ -65,27 +65,18 @@ services:
       # Frontend API URLs (relative paths, proxied through nginx)
       - VITE_GLOB_API_URL=/admin
       - VITE_GLOB_SSE_URL=/sse/events
-      # SSL — frontend's docker-entrypoint.sh defaults match these.
-      # We bind-mount the cert from a host directory rather than the
-      # full lcm-data named volume so the operator can rotate the cert
-      # with a plain `cp` and doesn't need docker-volume tooling. See
-      # README / MIGRATION.md for how to seed `./certs/frontend/` from
-      # the LCM ACME volume the first time.
+      # SSL — the image's /docker-entrypoint.sh detects these files at
+      # boot and adds an HTTPS server block to /etc/nginx/conf.d/default.conf.
+      # If the cert files are absent, the entrypoint falls back to HTTP-only
+      # on 8080 (ports 80/443 stay published but unbound inside).
       - SSL_CERT_PATH=/app/certs/frontend/server.crt
       - SSL_KEY_PATH=/app/certs/frontend/server.key
-      # Server name on the issued cert. Override per-deployment.
       - SERVER_NAME=${FRONTEND_SERVER_NAME:-localhost}
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf.template:ro
       # Host directory containing server.crt / server.key (and an
       # optional ca.crt). Read-only — the renewal flow writes here on
       # the host, not from inside this container.
       - ./certs/frontend:/app/certs/frontend:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        envsubst '$${BACKEND_HOST} $${BACKEND_PORT} $${SSE_PORT}' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf
-        /docker-entrypoint.sh nginx -g 'daemon off;'
     depends_on:
       admin-service:
         condition: service_healthy
