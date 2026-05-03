@@ -189,10 +189,28 @@ services:
             echo "Vault already initialized"
         fi
 
-        # Load unseal key and root token from init output
+        # Load unseal key and root token from init output. The vault
+        # CLI emits MULTI-LINE pretty-printed JSON; using grep+sed
+        # against `"key":"value"` patterns silently fails on it. Use
+        # awk's BEGIN-state machine to walk the JSON robustly without
+        # an external jq dep.
         if [ -f /vault-credentials/init.json ]; then
-            UNSEAL_KEY=$$(cat /vault-credentials/init.json | grep -o '"unseal_keys_b64":\[\"[^"]*\"' | sed 's/.*\["//' | sed 's/".*//')
-            ROOT_TOKEN=$$(cat /vault-credentials/init.json | grep -o '"root_token":"[^"]*"' | sed 's/"root_token":"//' | sed 's/".*//')
+            UNSEAL_KEY=$$(awk '
+                /unseal_keys_b64/ { in_arr=1; next }
+                in_arr && /"/ { match($$0, /"[^"]+"/); print substr($$0, RSTART+1, RLENGTH-2); exit }
+            ' /vault-credentials/init.json)
+            ROOT_TOKEN=$$(awk '
+                match($$0, /"root_token"[[:space:]]*:[[:space:]]*"[^"]+"/) {
+                    s = substr($$0, RSTART, RLENGTH);
+                    sub(/.*: *"/, "", s); sub(/".*/, "", s);
+                    print s; exit
+                }
+            ' /vault-credentials/init.json)
+            if [ -z "$$UNSEAL_KEY" ] || [ -z "$$ROOT_TOKEN" ]; then
+                echo "ERROR: failed to parse /vault-credentials/init.json"
+                cat /vault-credentials/init.json
+                exit 1
+            fi
         else
             echo "ERROR: No init.json found. Vault was initialized externally."
             exit 1
