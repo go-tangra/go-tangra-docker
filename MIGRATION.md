@@ -325,6 +325,47 @@ mixed-version deployments can coexist while you migrate module by module.
 
 ---
 
+## Restoring the frontend cert from lcm-data
+
+The legacy compose mounted the whole `lcm-data` named volume read-only into
+the frontend container so nginx could serve LCM's ACME-issued cert from
+`/app/certs/frontend/server.{crt,key}`. The new layout uses a **plain host
+bind mount** at `./certs/frontend/` instead — easier to inspect, easier to
+rotate, no docker-volume tooling needed.
+
+One-shot extraction from the existing volume:
+
+```bash
+cd /srv/portal       # or wherever this repo lives on the server
+
+# Resolve the volume name (compose prefixes it with the project name)
+VOL=$(docker volume ls --format '{{.Name}}' | grep -E 'lcm-data$' | head -1)
+
+# Copy the issued cert files out of the volume into ./certs/frontend/
+mkdir -p ./certs/frontend
+docker run --rm \
+  -v "${VOL}:/data:ro" \
+  -v "$(pwd)/certs/frontend:/out" \
+  alpine:3.20 sh -c '
+    cp /data/frontend/server.crt /out/
+    cp /data/frontend/server.key /out/
+    [ -f /data/frontend/ca.crt ] && cp /data/frontend/ca.crt /out/ || true
+'
+
+# Lock down perms
+chmod 644 ./certs/frontend/server.crt ./certs/frontend/ca.crt 2>/dev/null
+chmod 600 ./certs/frontend/server.key
+
+# Recreate the frontend with the new bind mount
+docker compose up -d --force-recreate frontend
+docker compose logs frontend | grep -E 'SSL|HTTPS'
+# Expected: "SSL certificates found, enabling HTTPS"
+```
+
+The `certs/` directory is gitignored. To rotate the cert later, drop new
+`server.crt` / `server.key` into `./certs/frontend/` on the host and
+`docker compose restart frontend` — no volume editing.
+
 ## Module versions
 
 The Phase 1 cutover landed in these tagged releases:

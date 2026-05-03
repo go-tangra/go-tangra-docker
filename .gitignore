@@ -22,3 +22,8 @@ docker-compose.dev.yaml
 .env
 .env.bak
 !.env.example
+
+# Bind-mounted SSL certs for the frontend. Per-deployment files,
+# never check them in. The directory itself is created by the operator
+# (see MIGRATION.md "Restoring the frontend cert from lcm-data").
+certs/
