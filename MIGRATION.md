@@ -338,10 +338,19 @@ One-shot extraction from the existing volume:
 ```bash
 cd /srv/portal       # or wherever this repo lives on the server
 
-# Resolve the volume name (compose prefixes it with the project name)
-VOL=$(docker volume ls --format '{{.Name}}' | grep -E 'lcm-data$' | head -1)
+# 1) Find the volume that actually contains /frontend/server.crt — there may
+#    be multiple lcm-data volumes from prior compose project names. List all
+#    candidates, then probe each.
+docker volume ls --format '{{.Name}}' | grep 'lcm-data$'
+for v in $(docker volume ls --format '{{.Name}}' | grep 'lcm-data$'); do
+  echo "--- $v ---"
+  docker run --rm -v "$v:/data:ro" alpine:3.20 ls /data/frontend/ 2>&1 | head -3
+done
 
-# Copy the issued cert files out of the volume into ./certs/frontend/
+# 2) Set VOL explicitly to the one that has server.crt + server.key
+VOL=portal_lcm-data    # ← change this if the listing above shows it elsewhere
+
+# 3) Copy the cert files into ./certs/frontend/
 mkdir -p ./certs/frontend
 docker run --rm \
   -v "${VOL}:/data:ro" \
