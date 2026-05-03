@@ -47,7 +47,7 @@ services:
     build:
       context: ../go-tangra-frontend
       dockerfile: Dockerfile
-    image: go-tangra/go-tangra-portal-frontend:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-frontend:${IMAGE_TAG}
     restart: always
     ports:
       - "8080:8080"
@@ -229,7 +229,7 @@ services:
     build:
       context: ../go-tangra-portal
       dockerfile: app/admin/service/Dockerfile
-    image: menta2l/admin-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-portal:${IMAGE_TAG}
     restart: always
     ports:
       - "7788:7788"
@@ -327,7 +327,7 @@ services:
       # + SignModuleCertificate RPC on this branch.
       context: ../go-tangra-lcm
       dockerfile: Dockerfile
-    image: menta2l/lcm-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-lcm:${IMAGE_TAG}
     restart: always
     ports:
       - "8000:8000"
@@ -377,7 +377,7 @@ services:
       # split out).
       context: ../go-tangra-deployer
       dockerfile: Dockerfile
-    image: menta2l/deployer-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-deployer:${IMAGE_TAG}
     restart: always
     ports:
       - "9200:9200"
@@ -422,7 +422,7 @@ services:
       # split out).
       context: ../go-tangra-warden
       dockerfile: Dockerfile
-    image: menta2l/warden-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-warden:${IMAGE_TAG}
     restart: always
     ports:
       - "9300:9300"
@@ -468,7 +468,7 @@ services:
       # split out).
       context: ../go-tangra-ipam
       dockerfile: Dockerfile
-    image: menta2l/ipam-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-ipam:${IMAGE_TAG}
     restart: always
     ports:
       - "9400:9400"
@@ -507,7 +507,7 @@ services:
       # split out).
       context: ../go-tangra-paperless
       dockerfile: Dockerfile
-    image: menta2l/paperless-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-paperless:${IMAGE_TAG}
     restart: always
     ports:
       - "9500:9500"
@@ -545,7 +545,7 @@ services:
     build:
       context: ../go-tangra-asterisk
       dockerfile: Dockerfile
-    image: menta2l/asterisk-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-asterisk:${IMAGE_TAG}
     restart: always
     ports:
       - "9800:9800"
@@ -743,7 +743,7 @@ services:
     build:
       context: ../go-tangra-scheduler
       dockerfile: Dockerfile
-    image: menta2l/scheduler-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-scheduler:${IMAGE_TAG}
     restart: always
     ports:
       - "10500:10500"
@@ -1007,7 +1007,7 @@ services:
     build:
       context: ../go-tangra-notification
       dockerfile: Dockerfile
-    image: menta2l/notification-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-notification:${IMAGE_TAG}
     restart: always
     ports:
       - "10300:10300"
@@ -1048,7 +1048,7 @@ services:
     build:
       context: ../go-tangra-hr
       dockerfile: Dockerfile
-    image: menta2l/hr-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-hr:${IMAGE_TAG}
     restart: always
     ports:
       - "10200:10200"
@@ -1096,7 +1096,7 @@ services:
     build:
       context: ../go-tangra-backup
       dockerfile: Dockerfile
-    image: menta2l/backup-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-backup:${IMAGE_TAG}
     restart: always
     ports:
       - "10100:10100"
@@ -1129,7 +1129,7 @@ services:
     build:
       context: ../go-tangra-sharing
       dockerfile: Dockerfile
-    image: menta2l/sharing-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-sharing:${IMAGE_TAG}
     restart: always
     ports:
       - "9600:9600"
@@ -1166,7 +1166,7 @@ services:
     build:
       context: ../go-tangra-signing
       dockerfile: Dockerfile
-    image: menta2l/signing-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-signing:${IMAGE_TAG}
     restart: always
     ports:
       - "10400:10400"
@@ -1208,7 +1208,7 @@ services:
     build:
       context: ../go-tangra-asset
       dockerfile: Dockerfile
-    image: menta2l/asset-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-asset:${IMAGE_TAG}
     restart: always
     ports:
       - "10600:10600"
@@ -1243,7 +1243,7 @@ services:
     build:
       context: ../go-tangra-executor
       dockerfile: Dockerfile
-    image: menta2l/executor-service:latest
+    image: ${IMAGE_REGISTRY}/go-tangra-executor:${IMAGE_TAG}
     restart: always
     ports:
       - "10700:10700"
