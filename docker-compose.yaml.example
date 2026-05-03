@@ -229,11 +229,6 @@ services:
     build:
       context: ../go-tangra-portal
       dockerfile: app/admin/service/Dockerfile
-      # Sibling go-tangra-common is COPY'd into the build via this
-      # named context so the temporary `replace ../go-tangra-common`
-      # in portal's go.mod resolves inside the build sandbox.
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/admin-service:latest
     restart: always
     ports:
@@ -332,9 +327,6 @@ services:
       # + SignModuleCertificate RPC on this branch.
       context: ../go-tangra-lcm
       dockerfile: Dockerfile
-      # See lcm-init above for the rationale on the named context.
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/lcm-service:latest
     restart: always
     ports:
@@ -385,8 +377,6 @@ services:
       # split out).
       context: ../go-tangra-deployer
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/deployer-service:latest
     restart: always
     ports:
@@ -432,8 +422,6 @@ services:
       # split out).
       context: ../go-tangra-warden
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/warden-service:latest
     restart: always
     ports:
@@ -480,8 +468,6 @@ services:
       # split out).
       context: ../go-tangra-ipam
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/ipam-service:latest
     restart: always
     ports:
@@ -521,8 +507,6 @@ services:
       # split out).
       context: ../go-tangra-paperless
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/paperless-service:latest
     restart: always
     ports:
@@ -561,8 +545,6 @@ services:
     build:
       context: ../go-tangra-asterisk
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/asterisk-service:latest
     restart: always
     ports:
@@ -672,11 +654,6 @@ services:
     build:
       context: ../go-tangra-sms-gw
       dockerfile: Dockerfile
-      # Sibling go-tangra-common is COPY'd into the build via this
-      # named context so the temporary `replace ../go-tangra-common`
-      # in sms-gw's go.mod resolves inside the build sandbox.
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/sms-gw-service:latest
     restart: always
     ports:
@@ -766,8 +743,6 @@ services:
     build:
       context: ../go-tangra-scheduler
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/scheduler-service:latest
     restart: always
     ports:
@@ -1032,8 +1007,6 @@ services:
     build:
       context: ../go-tangra-notification
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/notification-service:latest
     restart: always
     ports:
@@ -1075,8 +1048,6 @@ services:
     build:
       context: ../go-tangra-hr
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/hr-service:latest
     restart: always
     ports:
@@ -1125,8 +1096,6 @@ services:
     build:
       context: ../go-tangra-backup
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/backup-service:latest
     restart: always
     ports:
@@ -1160,8 +1129,6 @@ services:
     build:
       context: ../go-tangra-sharing
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/sharing-service:latest
     restart: always
     ports:
@@ -1199,8 +1166,6 @@ services:
     build:
       context: ../go-tangra-signing
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/signing-service:latest
     restart: always
     ports:
@@ -1243,8 +1208,6 @@ services:
     build:
       context: ../go-tangra-asset
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/asset-service:latest
     restart: always
     ports:
@@ -1280,8 +1243,6 @@ services:
     build:
       context: ../go-tangra-executor
       dockerfile: Dockerfile
-      additional_contexts:
-        common: ../go-tangra-common
     image: menta2l/executor-service:latest
     restart: always
     ports:
