@@ -19,7 +19,7 @@ scrape_configs:
     scrape_interval: 10s
     static_configs:
       - targets:
-          - sms-gw-service:9901
+          - sms-gw.verax.net:9901
         labels:
           service: sms-gw
-          instance: sms-gw-service
+          instance: sms-gw.verax.net
