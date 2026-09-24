@@ -5,7 +5,8 @@ stack bootstrapped end to end by **lcm** (the SPIFFE certificate authority).
 Every service runs from its published image and obtains its identity
 automatically; the only manual step is accepting the first operator invite.
 The defaults are workstation credentials — never use them unchanged outside a
-laptop or lab.
+laptop or lab. **For a production installation follow
+[PRODUCTION.md](PRODUCTION.md).**
 
 > **Looking for v3?** The v3 deployment (admin gateway, nginx front end,
 > `lcm-init` certificates) lives on the
@@ -46,6 +47,10 @@ and `ldap` (seeded test OpenLDAP for the auth directory import).
 | `scripts/` | `apply-allow.sh` (re-apply the gateway allow-list), `integrity-test.sh`. |
 | `Makefile` | Shortcuts (`make help`): init, up, down, reset, config, ps, logs, allow-list, integrity. |
 | `ENROLLMENT.md` | How identities are issued and how to enroll a new service. |
+| `PRODUCTION.md` | Production installation guide (hardening, TLS, Vault, SMTP, backups, operations). |
+| `docker-compose.production.yaml.example` | Production overlay; copy to `docker-compose.override.yaml` (see PRODUCTION.md). |
+| `configs/vault/config.hcl`, `scripts/vault-init-prod.sh` | Production Vault server config and warden AppRole setup. |
+| `scripts/prod-init.sh`, `scripts/gen-internal-tls.sh` | Generate the git-ignored `prod/` tree: credentials, keys, production configs, internal TLS. |
 
 All bind mounts are relative to the repository root, so run compose from here.
 

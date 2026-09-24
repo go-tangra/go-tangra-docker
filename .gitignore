@@ -36,3 +36,8 @@ ldap/**/*.srl
 *.crt
 *.csr
 freya-dev-edge.crt
+
+# Production secrets and generated files (scripts/prod-init.sh,
+# scripts/gen-internal-tls.sh): configs with credentials, key-encryption keys,
+# internal CA and certificates, the public edge certificate. Never commit.
+prod/
