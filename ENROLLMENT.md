@@ -103,8 +103,8 @@ Do the same as `notification`:
    ```
 
 5. **Gateway allow-list** — grant the service's route prefixes so it may
-   register. Add to `scripts/apply-allow.sh` and the `gateway-bootstrap`
-   command:
+   register. Add it to the `gateway-bootstrap` command in
+   `docker-compose.yaml` (`scripts/apply-allow.sh` re-runs that job):
    ```
    -allow 'spiffe://example.org/svc/<svc>=/api/<svc>[,/extra/prefix];<svc>'
    ```

@@ -1,39 +1,39 @@
-.PHONY: help up down restart build logs ps lcm-fingerprint lcm-bootstrap
+.PHONY: help init up down reset config ps logs pull allow-list integrity
+
+COMPOSE ?= docker compose
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-up: ## Start all services
-	@docker compose up -d
+init: docker-compose.yaml ## Create docker-compose.yaml (and .env) from the examples
+	@test -f .env || cp .env.example .env
 
-down: ## Stop all services
-	@docker compose down
+docker-compose.yaml:
+	cp docker-compose.yaml.example docker-compose.yaml
 
-restart: ## Restart all services
-	@docker compose restart
+up: ## Bring the stack up (up.sh: pull, up, print the operator accept link)
+	@./up.sh
 
-build: ## Build all services
-	@docker compose build
+down: ## Stop the stack, keep volumes
+	@$(COMPOSE) down
 
-logs: ## Follow logs for all services
-	@docker compose logs -f
+reset: ## Stop the stack and DELETE its volumes (database, CA, tokens, SVID state)
+	@$(COMPOSE) down -v
+
+config: docker-compose.yaml ## Validate the compose file with the current .env
+	@$(COMPOSE) config --quiet && echo "compose config OK"
 
 ps: ## Show running services
-	@docker compose ps
+	@$(COMPOSE) ps
 
-lcm-fingerprint: ## Print the LCM CA SHA-256 fingerprint (set WRITE=1 to update .env)
-	@./scripts/lcm-fingerprint.sh $(if $(WRITE),--write,)
+logs: ## Follow logs for all services
+	@$(COMPOSE) logs -f
 
-lcm-bootstrap: ## First-time setup: bring lcm-service up + write CA pin to .env
-	@docker compose up -d lcm-service
-	@echo "Waiting for lcm-service to generate the CA..."
-	@for i in $$(seq 1 60); do \
-	  if docker run --rm \
-	      -v $$(basename $$(pwd))_lcm-data:/data:ro \
-	      alpine:3.20 test -f /data/ca/ca.crt 2>/dev/null; then \
-	    break; \
-	  fi; \
-	  sleep 1; \
-	done
-	@./scripts/lcm-fingerprint.sh --write
-	@echo "Done. You can now bring up the rest of the stack: make up"
+pull: ## Pull the service images
+	@$(COMPOSE) pull --ignore-buildable
+
+allow-list: ## Re-apply the gateway registration allow-list
+	@./scripts/apply-allow.sh
+
+integrity: ## Run the SVID rotation integrity test (start with CERT_TTL=5m RENEW_INTERVAL=210)
+	@./scripts/integrity-test.sh
