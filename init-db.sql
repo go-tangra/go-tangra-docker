@@ -1,0 +1,88 @@
+-- Provisions every service database + application role in one TimescaleDB
+-- instance for the containerized platform stack. Workstation credentials only.
+CREATE DATABASE openfga;
+CREATE DATABASE auth;
+\c auth
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE auth_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE auth TO auth_app;
+\c postgres
+CREATE DATABASE gateway;
+\c gateway
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE gateway_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE gateway TO gateway_app;
+\c postgres
+CREATE DATABASE lcm;
+\c lcm
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE lcm_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE lcm TO lcm_app;
+\c postgres
+CREATE DATABASE warden;
+\c warden
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE warden_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE warden TO warden_app;
+\c postgres
+CREATE DATABASE notification;
+\c notification
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE notification_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE notification TO notification_app;
+\c postgres
+CREATE DATABASE deployer;
+\c deployer
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE deployer_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE deployer TO deployer_app;
+\c postgres
+CREATE DATABASE paperless;
+\c paperless
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE paperless_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE paperless TO paperless_app;
+\c postgres
+CREATE DATABASE inventory;
+\c inventory
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE inventory_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE inventory TO inventory_app;
+\c postgres
+CREATE DATABASE ipam;
+\c ipam
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE ipam_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE ipam TO ipam_app;
+\c postgres
+CREATE DATABASE asset;
+\c asset
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE asset_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE asset TO asset_app;
+\c postgres
+CREATE DATABASE ticket;
+\c ticket
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE ROLE ticket_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE ticket TO ticket_app;
+\c postgres
+CREATE DATABASE dns;
+\c dns
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS citext;
+CREATE ROLE dns_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE dns TO dns_app;
+\c postgres

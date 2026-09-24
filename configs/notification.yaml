@@ -1,0 +1,33 @@
+service_name: notification
+trust_domain: example.org
+env: dev
+# notification obtains its SVID by ENROLLING with lcm over the network (no
+# shared cert file) — the multi-host path. app.Build injects the enroll
+# provider, so identity is "provided".
+identity:
+  provider: provided
+enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/notification.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9943, http_addr: 0.0.0.0:9944 }
+admin: { addr: 127.0.0.1:9590 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+limits: { max_request_bytes: 16842752 }
+limits_notification: { backup_max_bytes: 16777216, send_per_tenant_per_minute: 600, send_per_sender_per_minute: 60, streams_per_user: 5, streams_per_tenant: 2000, replay_window_seconds: 300 }
+db:
+  dsn: postgres://notification_app:dev@timescaledb:5432/notification?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/notification?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: notification, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+smtp: { allow_plaintext: true, dial_timeout_seconds: 30 }
+scheduler: { interval_seconds: 15, lease_seconds: 60 }
+gateway: { service: gateway, issuer: https://localhost:8443 }

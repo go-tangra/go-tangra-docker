@@ -1,0 +1,36 @@
+service_name: warden
+trust_domain: example.org
+env: dev
+# warden enrolls with lcm over the network (workload; via the gateway edge).
+identity:
+  provider: provided
+enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/warden.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9843, http_addr: 0.0.0.0:9844 }
+admin: { addr: 127.0.0.1:9490 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+limits: { max_request_bytes: 16842752 }
+limits_warden: { transfer_max_bytes: 16777216 }
+db:
+  dsn: postgres://warden_app:dev@timescaledb:5432/warden?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/warden?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: warden, password: dev, allow_plaintext: true }
+vault:
+  address: http://vault:8200
+  mount: warden
+  role_id_file: /vault-creds/role_id
+  secret_id_file: /vault-creds/secret_id
+  allow_plaintext: true
+gateway: { service: gateway, issuer: https://localhost:8443 }
+share: { public_origin: https://localhost:8443 }
+mail: { transport: smtp, host: mailpit, port: 1025, from: warden@example.org, allow_plaintext: true }

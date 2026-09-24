@@ -1,0 +1,39 @@
+service_name: inventory
+trust_domain: example.org
+env: dev
+# inventory obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/inventory.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9975, http_addr: 0.0.0.0:9976 }
+admin: { addr: 127.0.0.1:9810 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+limits: { max_request_bytes: 16842752 }
+limits_inventory: { max_request_bytes: 16842752, max_snapshot_bytes: 16777216 }
+db:
+  dsn: postgres://inventory_app:dev@timescaledb:5432/inventory?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/inventory?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: inventory, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+# Off-mesh ingest edge: endpoint agents post snapshots here (dev: plaintext).
+ingest: { addr: 0.0.0.0:9977, insecure: true }
+registry: { heartbeat_seconds: 30 }
+retention: { days: 90 }
+stale: { after_seconds: 86400 }
+jobs: { workers: 4, interval_seconds: 60, purge_interval_seconds: 3600 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }
+enroll: { token_ttl_seconds: 3600 }

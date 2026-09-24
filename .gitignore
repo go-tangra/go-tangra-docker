@@ -10,20 +10,29 @@ Thumbs.db
 tmp/
 temp/
 
-# Local-only compose files. Contributors copy *.example to the unsuffixed
-# names and edit for their environment (cert fingerprints, image tags,
-# secrets, port overrides) — keep local edits out of version control.
+# Local-only compose files. Operators copy docker-compose.yaml.example to
+# docker-compose.yaml and edit it for their environment; a
+# docker-compose.override.yaml (e.g. building one service from a local
+# checkout) is merged automatically by docker compose and stays local too.
 docker-compose.yaml
-docker-compose.dev.yaml
+docker-compose.override.yaml
+compose.yaml
+compose.override.yaml
 
-# Local environment file with real secrets. Contributors copy .env.example
-# to .env and fill in real values. .env.example stays in git as the
-# template; .env is excluded.
+# Local environment file with real values. Operators copy .env.example to
+# .env; .env.example stays in git as the documented template.
 .env
-.env.bak
+.env.*
 !.env.example
 
-# Bind-mounted SSL certs for the frontend. Per-deployment files,
-# never check them in. The directory itself is created by the operator
-# (see MIGRATION.md "Restoring the frontend cert from lcm-data").
-certs/
+# Runtime-generated certificates and keys. ldap-certs writes the test
+# directory CA to ldap/ca.pem; anything else certificate-shaped under ldap/
+# or a trusted copy of the edge certificate is per-machine output.
+ldap/ca.pem
+ldap/**/*.pem
+ldap/**/*.key
+ldap/**/*.crt
+ldap/**/*.srl
+*.crt
+*.csr
+freya-dev-edge.crt

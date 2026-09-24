@@ -1,0 +1,75 @@
+service_name: dns
+trust_domain: example.org
+env: dev
+# dns obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/dns.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9965, http_addr: 0.0.0.0:9966 }
+admin: { addr: 127.0.0.1:9850 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+    ipam: ["ipam:9985"]
+    warden: ["warden:9743"]
+limits: { max_request_bytes: 67174400 }
+limits_dns: { max_request_bytes: 1048576, max_backup_bytes: 67108864, max_export_bytes: 33554432, max_page_size: 100 }
+db:
+  dsn: postgres://dns_app:dev@timescaledb:5432/dns?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/dns?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: dns, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+# The shared PowerDNS Authoritative server (compose service pdns-auth). Its API
+# listens on the internal compose network only (never published on the host).
+# The API keys are DEV file references generated once by dns-secrets-init into
+# the dns-secrets volume; production uses warden references
+# (api_key_ref: warden:<secret-id> + secrets.token_file) — see
+# deploy/README.md in go-tangra-dns.
+pdns:
+  api_url: http://pdns-auth:8081
+  server_id: localhost
+  api_key_ref: file:/secrets/pdns-auth.key
+  allow_plaintext: true
+  auth_forward_host: pdns-auth
+  auth_forward_port: 53
+recursor:
+  api_url: http://pdns-recursor:8082
+  server_id: localhost
+  api_key_ref: file:/secrets/pdns-recursor.key
+  allow_plaintext: true
+  reconcile_interval_seconds: 60
+# DEV: configuration saves restart ONLY these two containers through the
+# mounted Docker socket (root-equivalent on the host — production should use an
+# API-filtering socket proxy, see the README). The rendered files land in the
+# include directories shared with the PowerDNS containers.
+docker:
+  enabled: true
+  socket: /var/run/docker.sock
+  auth_container: freya-pdns-auth
+  recursor_container: freya-pdns-recursor
+managed_files:
+  auth_path: /pdns-auth-conf/50-freya.conf
+  recursor_path: /pdns-recursor-conf/50-freya.yml
+# The optional "metrics" compose profile runs Prometheus here; without it the
+# dashboard reports metrics unavailable.
+metrics: { prometheus_url: http://prometheus:9090 }
+# IPAM address events of the platform tenant become A/AAAA/PTR records.
+ipam_sync:
+  enabled: true
+  tenants: ["00000000-0000-0000-0000-000000000001"]
+  service: ipam
+acme: { allowed_caller: spiffe://example.org/svc/lcm }
+secrets: { warden_service: warden, refresh_seconds: 300 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }

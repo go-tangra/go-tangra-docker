@@ -1,0 +1,167 @@
+# Seed data for the Freya test OpenLDAP image (research D17, quickstart.md).
+# Base DN dc=example,dc=test. Fixture inventory (all e-mails @example.test):
+#
+#   uid=eng1..2          ou=Engineering, unique mail,        departmentNumber 42
+#   uid=eng5             ou=Engineering, unique mail,        departmentNumber 42,
+#                        receives a 1 MiB description at image build time
+#   uid=eng6, uid=eng7   ou=Engineering, SHARE eng-twins@   departmentNumber 42
+#                        (duplicate_email import fixture)
+#   uid=eng4             ou=Engineering, NO mail             departmentNumber 42
+#                        (no_email import fixture)
+#   uid=eng-outlier      ou=Engineering, unique mail,        departmentNumber 7
+#                        (must be excluded by a (departmentNumber=42) base filter)
+#   cn=eng-secret-alias  ou=Engineering, alias -> cn=hidden,ou=Secret
+#                        (alias deref is off; target is outside the base)
+#   ou=Partners          ou=Engineering, referral -> ldap://directory.example.invalid
+#                        (referrals must be counted, never followed)
+#   uid=sales1..3        ou=Sales,       unique mail         (outside the base)
+#   cn=hidden            ou=Secret,      unique mail         (alias target, outside base)
+#   cn=reader            service account, password "reader-password" (SSHA below)
+#
+# The connection base used throughout quickstart.md / the integration tests is
+# ou=Engineering,dc=example,dc=test. Bind as cn=reader,dc=example,dc=test.
+
+dn: dc=example,dc=test
+objectClass: dcObject
+objectClass: organization
+dc: example
+o: Example Test
+
+dn: cn=reader,dc=example,dc=test
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: reader
+description: read-only service account used by the auth service tests
+userPassword: {SSHA}Onbb4jbau89i/TgrhU9PBpxwXa+r3bMg
+
+dn: ou=Engineering,dc=example,dc=test
+objectClass: organizationalUnit
+ou: Engineering
+
+dn: uid=eng1,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng1
+cn: Eng One
+givenName: Eng
+sn: One
+displayName: Eng One
+mail: eng1@example.test
+departmentNumber: 42
+
+dn: uid=eng2,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng2
+cn: Eng Two
+givenName: Eng
+sn: Two
+displayName: Eng Two
+mail: eng2@example.test
+departmentNumber: 42
+
+dn: uid=eng4,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng4
+cn: Nina Nomail
+givenName: Nina
+sn: Nomail
+displayName: Nina Nomail
+departmentNumber: 42
+
+dn: uid=eng5,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng5
+cn: Eng Five
+givenName: Eng
+sn: Five
+displayName: Eng Five
+mail: eng5@example.test
+departmentNumber: 42
+
+dn: uid=eng6,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng6
+cn: Twin One
+givenName: Twin
+sn: One
+displayName: Twin One
+mail: eng-twins@example.test
+departmentNumber: 42
+
+dn: uid=eng7,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng7
+cn: Twin Two
+givenName: Twin
+sn: Two
+displayName: Twin Two
+mail: eng-twins@example.test
+departmentNumber: 42
+
+dn: uid=eng-outlier,ou=Engineering,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: eng-outlier
+cn: Olive Outlier
+givenName: Olive
+sn: Outlier
+displayName: Olive Outlier
+mail: outlier@example.test
+departmentNumber: 7
+
+dn: cn=eng-secret-alias,ou=Engineering,dc=example,dc=test
+objectClass: alias
+objectClass: extensibleObject
+cn: eng-secret-alias
+aliasedObjectName: cn=hidden,ou=Secret,dc=example,dc=test
+
+dn: ou=Partners,ou=Engineering,dc=example,dc=test
+objectClass: referral
+objectClass: extensibleObject
+ou: Partners
+ref: ldap://directory.example.invalid/ou=Partners,dc=example,dc=test
+
+dn: ou=Sales,dc=example,dc=test
+objectClass: organizationalUnit
+ou: Sales
+
+dn: uid=sales1,ou=Sales,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: sales1
+cn: Sales One
+givenName: Sales
+sn: One
+displayName: Sales One
+mail: sales1@example.test
+departmentNumber: 100
+
+dn: uid=sales2,ou=Sales,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: sales2
+cn: Sales Two
+givenName: Sales
+sn: Two
+displayName: Sales Two
+mail: sales2@example.test
+departmentNumber: 100
+
+dn: uid=sales3,ou=Sales,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: sales3
+cn: Sales Three
+givenName: Sales
+sn: Three
+displayName: Sales Three
+mail: sales3@example.test
+departmentNumber: 100
+
+dn: ou=Secret,dc=example,dc=test
+objectClass: organizationalUnit
+ou: Secret
+
+dn: cn=hidden,ou=Secret,dc=example,dc=test
+objectClass: inetOrgPerson
+uid: hidden
+cn: Hidden Secret
+givenName: Hidden
+sn: Secret
+displayName: Hidden Secret
+mail: hidden@example.test

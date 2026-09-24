@@ -1,0 +1,19 @@
+# Freya dev stack: base configuration of the PowerDNS Recursor (mounted
+# read-only as /etc/powerdns/recursor.conf; YAML settings, Recursor 5.x).
+# The include directory is the shared pdns-recursor-conf volume:
+#   00-api.yml    written ONCE by dns-secrets-init (webservice + API key +
+#                 api_dir; internal compose network only)
+#   50-freya.yml  rendered by the dns module from the saved Configuration
+#                 (managed_files.recursor_path; "Managed by Freya DNS")
+# Forward zones for every managed zone are added through the recursor API by
+# the dns module (persisted under webservice.api_dir) and point at pdns-auth.
+recursor:
+  include_dir: /etc/powerdns/recursor.d
+incoming:
+  listen:
+    - 0.0.0.0
+  port: 53
+dnssec:
+  validation: "off"
+logging:
+  loglevel: 4

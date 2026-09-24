@@ -1,0 +1,70 @@
+service_name: ticket
+trust_domain: example.org
+env: dev
+# ticket obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/ticket.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9955, http_addr: 0.0.0.0:9956 }
+admin: { addr: 127.0.0.1:9840 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+    warden: ["warden:9743"]
+limits: { max_request_bytes: 67174400 }
+limits_ticket: { max_request_bytes: 1048576, max_backup_bytes: 67108864, max_page_size: 100 }
+db:
+  dsn: postgres://ticket_app:dev@timescaledb:5432/ticket?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/ticket?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: ticket, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+# Attachments land in RustFS (dev: plaintext, shared dev credentials, own bucket).
+object_store:
+  endpoint: rustfs:9000
+  bucket: ticket
+  region: us-east-1
+  use_ssl: false
+  access_key: paperless
+  secret_key: paperless-dev-secret
+  presign_ttl_seconds: 300
+# Off-mesh inbound mail edge (published on the host as :9957). TLS uses the
+# stack's persistent dev edge certificate (CN/SAN localhost). The relay token is
+# a DEV file reference generated once by ticket-secrets-init into the
+# ticket-secrets volume (read it with:
+#   docker compose -p freya-stack exec ticket cat /secrets/relay.token).
+# Production: a warden reference (relay_token_ref: warden:<secret-id>) plus
+# secrets.token_file — see deploy/README.md in go-tangra-ticket.
+inbound:
+  addr: 0.0.0.0:9957
+  tls_cert_file: /edge/tls.crt
+  tls_key_file: /edge/tls.key
+  relay_token_ref: file:/secrets/relay.token
+  max_body_bytes: 10485760
+  max_attachment_bytes: 26214400
+  max_parts: 100
+  max_depth: 10
+# Outbound replies + acknowledgements go to Mailpit (dev SMTP sink, no auth).
+# Plaintext is allowed ONLY through this explicit development flag; Mailpit takes
+# no credentials, so no password_ref is configured.
+smtp:
+  host: mailpit
+  port: 1025
+  tls: none
+  allow_plaintext: true
+  mail_domain: example.org
+  timeout_seconds: 15
+rules: { cost_limit: 100000, eval_timeout_ms: 50, max_rules: 500 }
+secrets: { warden_service: warden, refresh_seconds: 300 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }

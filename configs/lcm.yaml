@@ -1,0 +1,31 @@
+service_name: lcm
+trust_domain: example.org
+env: dev
+# lcm self-issues its own SVID from its DB-sealed mesh root (no external cert
+# file); app.Build injects the provider, so this is just "provided".
+identity:
+  provider: provided
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9945, http_addr: 0.0.0.0:9946 }
+admin: { addr: 127.0.0.1:9591 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    dns: ["dns:9965"]
+limits: { max_request_bytes: 16842752 }
+limits_lcm: { backup_max_bytes: 16777216, csr_max_bytes: 16384, webhook_max_bytes: 65536, streams_per_user: 5, streams_per_tenant: 2000, replay_window_seconds: 300 }
+db:
+  dsn: postgres://lcm_app:dev@timescaledb:5432/lcm?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/lcm?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: lcm, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+renewal: { interval_seconds: 15, lease_seconds: 60, workers: 4, short_lived_fraction: 0.5, long_lived_days: 30 }
+gateway: { service: gateway, issuer: https://localhost:8443 }
+acme: { allow_plaintext_dns: true }
+# The "Freya DNS" ACME DNS-01 provider writes challenge TXT records through the
+# dns module (dns.v1.Challenges over SPIFFE mTLS; dns allows only lcm).
+dns: { service: dns }
+# Keyless (server-auth-only) enroll listener so services with no SVID yet
+# (the gateway) can enroll directly with a join token.
+enroll_listener: 0.0.0.0:9947

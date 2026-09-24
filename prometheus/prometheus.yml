@@ -1,0 +1,9 @@
+# Optional "metrics" profile: scrape both PowerDNS webservers for the dns
+# dashboard (dns service metrics.prometheus_url: http://prometheus:9090).
+global:
+  scrape_interval: 15s
+scrape_configs:
+  - job_name: pdns-auth
+    static_configs: [{ targets: ["pdns-auth:8081"] }]
+  - job_name: pdns-recursor
+    static_configs: [{ targets: ["pdns-recursor:8082"] }]

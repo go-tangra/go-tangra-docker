@@ -1,0 +1,37 @@
+service_name: ipam
+trust_domain: example.org
+env: dev
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/ipam.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9985, http_addr: 0.0.0.0:9986 }
+admin: { addr: 127.0.0.1:9820 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+    warden: ["warden:9743"]
+limits: { max_request_bytes: 16842752 }
+limits_ipam: { max_request_bytes: 16842752, max_backup_bytes: 33554432 }
+db:
+  dsn: postgres://ipam_app:dev@timescaledb:5432/ipam?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/ipam?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: ipam, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+warden: { service: warden }
+# Active network operations (bounded, tenant-scoped, audited).
+scan: { max_hosts: 1024, concurrency: 50, timeout_ms: 1000, workers: 3, max_retries: 3 }
+allocation: { skip_first: 0, skip_last: 0, reserved_ranges: [] }
+ipmi: { timeout_seconds: 10 }
+kvm: { token_ttl_seconds: 300, session_seconds: 3600 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }
