@@ -2,6 +2,11 @@
 # Prepare the production files of a go-tangra v4 compose deployment
 # (see PRODUCTION.md, "Secrets and hardening"). Run from the repository root:
 #
+#   cp .env.example .env   # fill in the "prod-init.sh inputs" section
+#   ./scripts/prod-init.sh
+#
+# or pass the inputs on the command line (they override .env):
+#
 #   PUBLIC_HOST=tangra.example.com \
 #   SMTP_HOST=smtp.example.com SMTP_PORT=587 SMTP_USERNAME=tangra@example.com \
 #   SMTP_PASSWORD='...' MAIL_FROM=tangra@example.com \
@@ -23,7 +28,7 @@
 # (they must match the database and the sealed data). prod/configs is only
 # rewritten with FORCE=1 (that discards manual edits made there).
 #
-# Environment:
+# Inputs (environment, else .env):
 #   PUBLIC_HOST     public DNS name of the edge (required)
 #   PUBLIC_PORT     public port browsers use (default 443; the origin then has no port)
 #   SMTP_HOST       mail relay host (required)
@@ -35,9 +40,30 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 die() { echo "prod-init: $*" >&2; exit 1; }
-: "${PUBLIC_HOST:?set PUBLIC_HOST (public DNS name of the edge)}"
-: "${SMTP_HOST:?set SMTP_HOST (the real mail relay)}"
-: "${MAIL_FROM:?set MAIL_FROM (sender address, e.g. tangra@example.com)}"
+
+# Inputs may come from .env (see the "prod-init.sh inputs" section of
+# .env.example); a variable already set in the environment wins. .env is parsed,
+# not sourced, so its contents are never executed: KEY=VALUE lines only, with an
+# optional `export `, surrounding single or double quotes stripped, and
+# comments/blank lines ignored.
+INPUTS="PUBLIC_HOST PUBLIC_PORT SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
+if [ -f .env ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Z_][A-Z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[2]}" val="${BASH_REMATCH[3]}"
+    [[ " $INPUTS " == *" $key "* ]] || continue
+    [ -z "${!key+x}" ] || continue # already set in the environment
+    if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    [ -n "$val" ] || continue
+    printf -v "$key" '%s' "$val"
+    export "${key?}"
+  done < .env
+fi
+
+: "${PUBLIC_HOST:?set PUBLIC_HOST (public DNS name of the edge) in .env or the environment}"
+: "${SMTP_HOST:?set SMTP_HOST (the real mail relay) in .env or the environment}"
+: "${MAIL_FROM:?set MAIL_FROM (sender address, e.g. tangra@example.com) in .env or the environment}"
 PUBLIC_PORT="${PUBLIC_PORT:-443}"
 SMTP_PORT="${SMTP_PORT:-587}"
 SMTP_USERNAME="${SMTP_USERNAME:-}"
