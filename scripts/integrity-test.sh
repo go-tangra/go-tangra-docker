@@ -15,7 +15,7 @@
 #   bash scripts/integrity-test.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
-PROJECT=freya-stack
+PROJECT=${COMPOSE_PROJECT_NAME:-freya-stack}
 COMPOSE="docker compose -p $PROJECT -f docker-compose.yaml"
 SERVICES="lcm notification auth"
 DOCKER(){ sg docker -c "$*"; }
