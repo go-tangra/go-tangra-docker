@@ -120,6 +120,7 @@ specific address) and, for source filtering, the `DOCKER-USER` chain.
 | Port | Expose publicly? | Variable |
 |---|---|---|
 | 443 -> gateway 8443 | **Yes** - browsers and API clients | `EDGE_PORT=443`, `EDGE_BIND` |
+| 80 -> http-redirect | **Yes** - plain-HTTP visitors get a `301` to `PUBLIC_ORIGIN` (path and query kept; the target never comes from the Host header), and Let's Encrypt HTTP-01 challenges are served from `prod/acme` | `HTTP_PORT=80`, `HTTP_BIND` |
 | 9957 ticket inbound mail edge | Only to your MTA's addresses, and only if you use ticket email intake | `TICKET_INBOUND_PORT`, `TICKET_INBOUND_BIND` |
 | 53 udp+tcp PowerDNS Authoritative | Only if pdns-auth serves public zones (and for Let's Encrypt DNS-01 via `freya-dns`) | `PDNS_AUTH_PORT=53`, `PDNS_AUTH_BIND=<public IP>` |
 | PowerDNS Recursor | **Never** publicly (open resolver). Keep `PDNS_RECURSOR_BIND=127.0.0.1` or an internal address | `PDNS_RECURSOR_*` |
@@ -348,11 +349,12 @@ prod/edge/tls.crt   # full chain, PEM
 prod/edge/tls.key   # private key, PEM
 ```
 
-Example with certbot on the host (HTTP-01 needs port 80 free; nothing in the
-stack uses it):
+Example with certbot on the host. Port 80 belongs to the `http-redirect`
+service (HTTP -> HTTPS), which also serves the HTTP-01 challenge files from
+`prod/acme`, so certbot runs in **webroot** mode against that directory:
 
 ```sh
-sudo certbot certonly --standalone -d tangra.example.com \
+sudo certbot certonly --webroot -w /opt/tangra/prod/acme -d tangra.example.com \
   --deploy-hook 'install -m 0644 "$RENEWED_LINEAGE/fullchain.pem" /opt/tangra/prod/edge/tls.crt &&
                  install -m 0600 "$RENEWED_LINEAGE/privkey.pem"   /opt/tangra/prod/edge/tls.key &&
                  cd /opt/tangra && docker compose restart ticket'
@@ -363,6 +365,14 @@ symlinks). The gateway re-reads the files every minute; ticket reads its
 inbound certificate only at start (hence the restart). The same files serve the
 ticket inbound edge (`inbound.tls_cert_file`/`tls_key_file`), so your MTA must
 connect to `https://<PUBLIC_HOST>:9957`.
+
+**HTTP -> HTTPS.** The `http-redirect` service (unprivileged nginx, read-only
+root, all capabilities dropped) answers every request on port 80 with a `301`
+to `PUBLIC_ORIGIN` plus the original path and query. `prod-init.sh` writes
+`PUBLIC_ORIGIN` into `.env` (`https://PUBLIC_HOST`, with `:PUBLIC_PORT` when that
+is not 443). Only `/.well-known/acme-challenge/` is served instead, from
+`prod/acme`, for certbot. For the very first certificate, start just this
+service (`docker compose up -d http-redirect`), run certbot, then start the rest.
 
 The edge speaks **TLS 1.3 only**. Behind a TLS-terminating load balancer add its
 address to `edge.trusted_proxies` (CIDRs allowed to set `X-Forwarded-For`) in
@@ -574,6 +584,7 @@ root) (verify).
 - [ ] `prod-init.sh` run; `git diff --no-index configs prod/configs` reviewed
 - [ ] `gen-internal-tls.sh` run; `prod/tls/ca-private` moved off the host
 - [ ] `prod/edge/tls.crt` + `tls.key` present (public CA, `PUBLIC_HOST`)
+- [ ] `http-redirect` answers `http://PUBLIC_HOST/` with a 301 to `PUBLIC_ORIGIN`; certbot renews via `--webroot -w prod/acme`
 - [ ] `docker-compose.override.yaml` = the production overlay; `.env` ports, `OPERATOR_EMAIL`, image pins
 - [ ] SPF/DKIM/DMARC/PTR for the sending domain; relay accepts the host
 - [ ] Vault unseal model chosen (4.7); key holders named

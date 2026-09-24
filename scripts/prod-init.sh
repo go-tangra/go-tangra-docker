@@ -22,7 +22,7 @@
 #   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
 #   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
 #
-# and writes the compose-level credentials and PUBLIC_HOST into .env.
+# and writes the compose-level credentials, PUBLIC_HOST and PUBLIC_ORIGIN into .env.
 #
 # Safe to re-run: credentials and KEKs are generated once and never replaced
 # (they must match the database and the sealed data). prod/configs is only
@@ -84,7 +84,8 @@ SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam
 KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns"
 
 umask 077
-mkdir -p prod/keys prod/configs prod/secrets prod/edge
+mkdir -p prod/keys prod/configs prod/secrets prod/edge prod/acme
+chmod 0755 prod/acme   # served read-only by http-redirect (uid 101) for ACME HTTP-01
 
 # --- credentials (generated once) -------------------------------------------
 rand() { openssl rand -hex "${1:-24}"; }
@@ -219,6 +220,7 @@ set_env() { # <key> <value>
 }
 for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY; do set_env "$k" "${!k}"; done
 set_env PUBLIC_HOST "$PUBLIC_HOST"
+set_env PUBLIC_ORIGIN "$ORIGIN"
 chmod 0600 .env
-echo "updated .env (credentials, PUBLIC_HOST)"
+echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN)"
 echo "next: put the public certificate in prod/edge/ (tls.crt, tls.key) and follow PRODUCTION.md"
