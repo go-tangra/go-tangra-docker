@@ -19,7 +19,7 @@ discovery:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
-    warden: ["warden:9743"]
+    warden: ["warden:9843"]
 limits: { max_request_bytes: 16842752 }
 limits_ipam: { max_request_bytes: 16842752, max_backup_bytes: 33554432 }
 db:

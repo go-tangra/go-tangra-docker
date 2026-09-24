@@ -22,7 +22,7 @@ discovery:
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
     ipam: ["ipam:9985"]
-    warden: ["warden:9743"]
+    warden: ["warden:9843"]
 limits: { max_request_bytes: 67174400 }
 limits_dns: { max_request_bytes: 1048576, max_backup_bytes: 67108864, max_export_bytes: 33554432, max_page_size: 100 }
 db:

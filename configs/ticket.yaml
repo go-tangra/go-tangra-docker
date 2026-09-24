@@ -21,7 +21,7 @@ discovery:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
-    warden: ["warden:9743"]
+    warden: ["warden:9843"]
 limits: { max_request_bytes: 67174400 }
 limits_ticket: { max_request_bytes: 1048576, max_backup_bytes: 67108864, max_page_size: 100 }
 db:
