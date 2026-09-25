@@ -184,7 +184,8 @@ else
   replace_line "$f" '^mail:' "mail: { transport: smtp, host: ${SMTP_HOST}, port: ${SMTP_PORT}${MAIL_AUTH}, from: $(yq_str "$MAIL_FROM"), allow_plaintext: false }"
   replace_line prod/configs/notification.yaml '^smtp:' 'smtp: { allow_plaintext: false, dial_timeout_seconds: 30 }'
   replace_line prod/configs/lcm.yaml '^acme:' 'acme: { allow_plaintext_dns: false }'
-  replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false }'
+  # inventory ingest edge (agents): TLS with the public edge certificate.
+  replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }'
   f=prod/configs/ticket.yaml
   replace_line "$f" '^  host: mailpit$' "  host: ${SMTP_HOST}"
   replace_line "$f" '^  port: 1025$' "  port: ${SMTP_PORT}"

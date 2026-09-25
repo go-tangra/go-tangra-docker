@@ -364,7 +364,11 @@ Copy the files (do not bind-mount `/etc/letsencrypt/live`, its entries are
 symlinks). The gateway re-reads the files every minute; ticket reads its
 inbound certificate only at start (hence the restart). The same files serve the
 ticket inbound edge (`inbound.tls_cert_file`/`tls_key_file`), so your MTA must
-connect to `https://<PUBLIC_HOST>:9957`.
+connect to `https://<PUBLIC_HOST>:9957`. The inventory agent ingest edge
+(`ingest.tls_cert_file`/`tls_key_file`, port 9977) uses them too and re-reads
+them every minute; agents connect to `https://<PUBLIC_HOST>:9977`. This needs
+inventory 4.1.0 or later (4.0.0 served ingest in plaintext and connected its
+registry to Valkey without TLS).
 
 **HTTP -> HTTPS.** The `http-redirect` service (unprivileged nginx, read-only
 root, all capabilities dropped) answers every request on port 80 with a `301`
@@ -872,6 +876,7 @@ Valkey and job workers use database leases, but it is untested here).
 |---|---|
 | A service exits with `config: ...` | `Validate()` refused a setting; the message names the key (section 4.1). |
 | `gateway-bootstrap`: `config: open deploy/container.yaml: permission denied` | `prod/configs/*.yaml` are `0600 root`; a job that runs as the image's non-root user cannot read them. The overlay runs `gateway-bootstrap` as `0:0` (pull the latest overlay and copy it to `docker-compose.override.yaml` again). |
+| Inventory restarts: `registry valkey: ... connection reset by peer`, Valkey logs `SSL routines::wrong version number` | Inventory 4.0.0 connected its registry to Valkey without TLS. Use inventory 4.1.0 or later (`INVENTORY_IMAGE` / `TANGRA_VERSION`). 4.1.0 also serves the agent ingest edge over TLS and refuses to start without its certificate: in an existing `prod/configs/inventory.yaml` set `ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }` and mount `./prod/edge:/edge:ro` into inventory (current overlay does). |
 | Gateway: `edge: cert: open /edge/tls.crt: no such file or directory` although `prod/edge/tls.crt` exists | `prod/edge/` holds **symlinks** (e.g. into `/etc/letsencrypt/archive/`). Only `prod/edge` is mounted, so the link targets do not exist inside the container. Copy the files instead: `install -m 0644 fullchain.pem prod/edge/tls.crt` and `install -m 0600 privkey.pem prod/edge/tls.key` (the certbot deploy hook in section 4.5 does exactly this on every renewal). |
 | `service "<name>" has neither an image nor a build context specified` | Compose is reading the production overlay on its own (for example it was copied to `docker-compose.yaml`). The overlay only adds to the base stack: `docker-compose.yaml` must be a copy of `docker-compose.yaml.example` and `docker-compose.override.yaml` a copy of `docker-compose.production.yaml.example`. |
 | `config: kek: open deploy/dev-kek.b64: no such file or directory` in a `*-token` job | The job runs without the auth KEK. Both compose files mount it (`./keys/auth.kek` in the base, `./prod/keys/auth.kek` in the overlay); check that `docker-compose.override.yaml` is the production overlay and that `prod-init.sh` has created `prod/keys/auth.kek`. |

@@ -256,6 +256,8 @@ services:
     volumes:
       - "./prod/keys/inventory.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/inventory.yaml:/app/deploy/container.yaml:ro"
+      # Agent ingest edge certificate (ingest.tls_cert_file / tls_key_file).
+      - "./prod/edge:/edge:ro"
       - *tangra-tls
   ipam:
     restart: unless-stopped
