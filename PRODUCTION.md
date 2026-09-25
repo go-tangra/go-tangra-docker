@@ -457,9 +457,12 @@ copy host, port, username and from from `prod/configs/auth.yaml` (`email:`)
 into `platform_email` in `prod/configs/notification.yaml` (tls: `starttls` for
 587, `implicit` for 465), write the password to `prod/secrets/smtp.password`
 (`install -m 0600`), set `email: { transport: notification }` in auth and
-`mail: { transport: notification }` in warden, add the secret mount to
-notification in `docker-compose.override.yaml`, then upgrade notification
-first and auth/warden after it.
+`mail: { transport: notification }` in warden, add
+`notification: ["notification:9943"]` under `discovery.static` in both auth
+and warden (without it auth logs `discovery: unknown service "notification"`
+and keeps the mail queued), add the secret mount to notification in
+`docker-compose.override.yaml` if the relay needs a login, then upgrade
+notification first and auth/warden after it.
 
 ### 4.7 Vault (warden's secret store)
 

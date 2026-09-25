@@ -10,6 +10,7 @@ admin: { addr: 127.0.0.1:9190 }
 discovery:
   static:
     gateway: ["gateway:9643"]
+    notification: ["notification:9943"]   # outbound mail (email.transport: notification)
 gateway: { enabled: true, service: gateway }
 issuer: https://localhost:8443
 db:

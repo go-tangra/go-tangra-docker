@@ -19,6 +19,7 @@ discovery:
   static:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
+    notification: ["notification:9943"]   # share mail (mail.transport: notification)
 limits: { max_request_bytes: 16842752 }
 limits_warden: { transfer_max_bytes: 16777216 }
 db:
