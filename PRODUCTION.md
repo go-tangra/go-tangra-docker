@@ -215,7 +215,7 @@ production-equivalent values (TLS everywhere) by hand.
 ### 4.2 Generate the production tree (`scripts/prod-init.sh`)
 
 ```sh
-PUBLIC_HOST=tangra.example.com \
+PUBLIC_HOST=tangra.example.com TRUST_DOMAIN=infra.example.com \
 SMTP_HOST=smtp.example.com SMTP_PORT=587 \
 SMTP_USERNAME=tangra@example.com SMTP_PASSWORD='relay-password' \
 MAIL_FROM=tangra@example.com \
@@ -223,7 +223,7 @@ MAIL_FROM=tangra@example.com \
 ```
 
 (`PUBLIC_PORT=8443` if browsers use a non-443 port; omit `SMTP_USERNAME` /
-`SMTP_PASSWORD` for an IP-allow-listed relay.)
+`SMTP_PASSWORD` for an IP-allow-listed relay; `TRUST_DOMAIN`: section 4.12.)
 
 It creates `prod/` (git-ignored, mode 0700/0600):
 
@@ -576,12 +576,60 @@ This is independent of the edge certificate (section 4.5).
 
 ### 4.12 Trust domain
 
-The stack uses the trust domain `example.org` in every config
-(`trust_domain`), the gateway allow-list and the `*-token` jobs
-(`spiffe://example.org/svc/...`), and dns `acme.allowed_caller`. It is an
-internal identifier and works unchanged. To change it, change **all** of those
-consistently **before the first start** (a new trust domain means a new mesh
-root) (verify).
+Every workload identity is `spiffe://<TRUST_DOMAIN>/svc/<service>`, and lcm
+keeps one mesh root per trust domain. The development stack uses `example.org`;
+production uses a domain you control, e.g. `infra.example.com` (it is an
+identifier only: nothing is resolved in DNS and no public certificate is
+involved).
+
+`TRUST_DOMAIN` in `.env` is a required `prod-init.sh` input (`example.org` is
+refused). The script writes it into every `prod/configs/*.yaml`
+(`trust_domain`, dns `acme.allowed_caller`) and into `.env`, where the gateway
+allow-list (`gateway-bootstrap`) and the `*-token` jobs of the base compose
+file pick it up. A re-run refuses kept configs whose trust domain differs from
+`TRUST_DOMAIN`. Choose it before the first start.
+
+**Changing it on a running stack** (e.g. an install that started with
+`example.org`). Users, data, secrets and the Vault state are unaffected; the
+mesh gets a new root and every service enrolls again.
+In the deployment directory:
+
+```sh
+NEW=infra.example.com           # the new trust domain
+P=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$(docker compose ps -q timescaledb)")
+
+# 1. stop the application services (databases, Valkey, OpenFGA, Vault keep running;
+#    restarting Vault would seal it)
+APPS="renewer lcm auth gateway notification warden deployer paperless inventory ipam asset ticket dns"
+docker compose stop $APPS
+
+# 2. configs and .env
+sed -i -E -e "s#^trust_domain: .*#trust_domain: ${NEW}#" \
+          -e "s#spiffe://example\.org/#spiffe://${NEW}/#g" prod/configs/*.yaml
+grep -n 'example\.org' prod/configs/*.yaml | grep -v '@'   # expect no output
+grep -q '^TRUST_DOMAIN=' .env && sed -i "s#^TRUST_DOMAIN=.*#TRUST_DOMAIN=${NEW}#" .env \
+  || echo "TRUST_DOMAIN=${NEW}" >> .env
+docker compose config | grep -c "spiffe://${NEW}/"          # allow-list + token jobs
+
+# 3. drop the persisted SVIDs of the old trust domain (services enroll afresh)
+for v in $(docker volume ls -q --filter "label=com.docker.compose.project=$P" | grep -- '-state$'); do
+  docker run --rm -v "$v:/s" alpine rm -f /s/svid.json /s/svid.json.tmp
+done
+
+# 4. retire the old allow-list rows (gateway-bootstrap adds the new ones)
+docker compose exec timescaledb psql -U postgres -d gateway -c \
+  "UPDATE allow_list SET revoked_at = now() WHERE spiffe_id LIKE 'spiffe://example.org/%' AND revoked_at IS NULL;"
+
+# 5. start: lcm-bootstrap creates the new root and file SVIDs, the *-token jobs
+#    mint tokens for the new ids, gateway-bootstrap seeds the allow-list
+docker compose up -d
+docker compose logs gateway auth lcm --since 5m | grep -i 'trust\|x509\|refused' | head
+```
+
+Replace `example.org` in steps 2 and 4 when moving away from another trust
+domain. The old root stays in the lcm database, unused. Step 3 is needed
+because services up to lcm sdk 4.0.0 reuse a saved SVID without checking its
+identity.
 
 ### 4.13 Checklist
 
@@ -589,6 +637,7 @@ root) (verify).
 - [ ] `gen-internal-tls.sh` run; `prod/tls/ca-private` moved off the host
 - [ ] `prod/edge/tls.crt` + `tls.key` present (public CA, `PUBLIC_HOST`)
 - [ ] `http-redirect` answers `http://PUBLIC_HOST/` with a 301 to `PUBLIC_ORIGIN`; certbot renews via `--webroot -w prod/acme`
+- [ ] `TRUST_DOMAIN` set to a domain you control (4.12)
 - [ ] `docker-compose.override.yaml` = the production overlay; `.env` ports, `OPERATOR_EMAIL`, image pins
 - [ ] SPF/DKIM/DMARC/PTR for the sending domain; relay accepts the host
 - [ ] Vault unseal model chosen (4.7); key holders named

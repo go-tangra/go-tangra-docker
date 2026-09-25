@@ -181,17 +181,17 @@ services:
   gateway-bootstrap:
     image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.0.0}}
     command: ["bootstrap","-config","deploy/container.yaml",
-      "-allow","spiffe://example.org/svc/auth=/api/v1,/authorize,/.well-known,/console;auth",
-      "-allow","spiffe://example.org/svc/lcm=/api/lcm;lcm",
-      "-allow","spiffe://example.org/svc/notification=/api/notification;notification",
-      "-allow","spiffe://example.org/svc/warden=/api/warden,/warden/share;warden",
-      "-allow","spiffe://example.org/svc/deployer=/api/deployer;deployer",
-      "-allow","spiffe://example.org/svc/paperless=/api/paperless;paperless",
-      "-allow","spiffe://example.org/svc/inventory=/api/inventory;inventory",
-      "-allow","spiffe://example.org/svc/ipam=/api/ipam;ipam",
-      "-allow","spiffe://example.org/svc/asset=/api/asset;asset",
-      "-allow","spiffe://example.org/svc/ticket=/api/ticket;ticket",
-      "-allow","spiffe://example.org/svc/dns=/api/dns;dns"]
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/auth=/api/v1,/authorize,/.well-known,/console;auth",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/lcm=/api/lcm;lcm",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/notification=/api/notification;notification",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/warden=/api/warden,/warden/share;warden",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/deployer=/api/deployer;deployer",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/paperless=/api/paperless;paperless",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/inventory=/api/inventory;inventory",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/ipam=/api/ipam;ipam",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/asset=/api/asset;asset",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/ticket=/api/ticket;ticket",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns=/api/dns;dns"]
     volumes: ["certs:/certs:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -262,7 +262,7 @@ services:
   gateway-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/gateway","-ttl","30m","-out","/tokens/gateway.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/gateway","-ttl","30m","-out","/tokens/gateway.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -295,7 +295,7 @@ services:
   notification-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/notification","-ttl","30m","-out","/tokens/notification.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/notification","-ttl","30m","-out","/tokens/notification.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -325,7 +325,7 @@ services:
   warden-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/warden","-ttl","30m","-out","/tokens/warden.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/warden","-ttl","30m","-out","/tokens/warden.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -354,7 +354,7 @@ services:
   deployer-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/deployer","-ttl","30m","-out","/tokens/deployer.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/deployer","-ttl","30m","-out","/tokens/deployer.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -385,7 +385,7 @@ services:
   paperless-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/paperless","-ttl","30m","-out","/tokens/paperless.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/paperless","-ttl","30m","-out","/tokens/paperless.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -421,7 +421,7 @@ services:
   inventory-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/inventory","-ttl","30m","-out","/tokens/inventory.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/inventory","-ttl","30m","-out","/tokens/inventory.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -454,7 +454,7 @@ services:
   ipam-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/ipam","-ttl","30m","-out","/tokens/ipam.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/ipam","-ttl","30m","-out","/tokens/ipam.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -488,7 +488,7 @@ services:
   asset-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/asset","-ttl","30m","-out","/tokens/asset.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/asset","-ttl","30m","-out","/tokens/asset.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -522,7 +522,7 @@ services:
   ticket-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/ticket","-ttl","30m","-out","/tokens/ticket.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/ticket","-ttl","30m","-out","/tokens/ticket.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -682,7 +682,7 @@ services:
   dns-token:
     image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
     user: "0:0"
-    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://example.org/svc/dns","-ttl","30m","-out","/tokens/dns.token"]
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns","-ttl","30m","-out","/tokens/dns.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:

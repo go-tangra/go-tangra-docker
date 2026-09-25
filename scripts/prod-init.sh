@@ -22,7 +22,8 @@
 #   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
 #   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
 #
-# and writes the compose-level credentials, PUBLIC_HOST and PUBLIC_ORIGIN into .env.
+# and writes the compose-level credentials, PUBLIC_HOST, PUBLIC_ORIGIN and
+# TRUST_DOMAIN into .env.
 #
 # Safe to re-run: credentials and KEKs are generated once and never replaced
 # (they must match the database and the sealed data). prod/configs is only
@@ -31,6 +32,8 @@
 # Inputs (environment, else .env):
 #   PUBLIC_HOST     public DNS name of the edge (required)
 #   PUBLIC_PORT     public port browsers use (default 443; the origin then has no port)
+#   TRUST_DOMAIN    SPIFFE trust domain of the mesh, a domain you control, e.g.
+#                   infra.example.com (required; not example.org)
 #   SMTP_HOST       mail relay host (required)
 #   SMTP_PORT       465 (implicit TLS) or 587 (STARTTLS) (default 587)
 #   SMTP_USERNAME   relay user; empty = no SMTP authentication (IP-allow-listed relay)
@@ -46,7 +49,7 @@ die() { echo "prod-init: $*" >&2; exit 1; }
 # not sourced, so its contents are never executed: KEY=VALUE lines only, with an
 # optional `export `, surrounding single or double quotes stripped, and
 # comments/blank lines ignored.
-INPUTS="PUBLIC_HOST PUBLIC_PORT SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
+INPUTS="PUBLIC_HOST PUBLIC_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
 if [ -f .env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
@@ -62,6 +65,7 @@ if [ -f .env ]; then
 fi
 
 : "${PUBLIC_HOST:?set PUBLIC_HOST (public DNS name of the edge) in .env or the environment}"
+: "${TRUST_DOMAIN:?set TRUST_DOMAIN (SPIFFE trust domain, a domain you control, e.g. infra.example.com) in .env or the environment}"
 : "${SMTP_HOST:?set SMTP_HOST (the real mail relay) in .env or the environment}"
 : "${MAIL_FROM:?set MAIL_FROM (sender address, e.g. tangra@example.com) in .env or the environment}"
 PUBLIC_PORT="${PUBLIC_PORT:-443}"
@@ -74,6 +78,8 @@ case "$SMTP_PORT" in
   *) die "SMTP_PORT must be 465 (implicit TLS) or 587 (STARTTLS): auth and warden accept only these ports with TLS" ;;
 esac
 [[ "$PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "PUBLIC_HOST must be a bare DNS name"
+[[ "$TRUST_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "TRUST_DOMAIN must be a lowercase DNS name (no scheme, port or path)"
+[ "$TRUST_DOMAIN" != example.org ] || die "TRUST_DOMAIN: example.org is the development trust domain; use a domain you control"
 [[ "$SMTP_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "SMTP_HOST must be a bare host name"
 [[ "$MAIL_FROM" =~ ^[^@[:space:]]+@([A-Za-z0-9.-]+)$ ]] || die "MAIL_FROM must be an email address"
 MAIL_DOMAIN="${BASH_REMATCH[1]}"
@@ -158,6 +164,8 @@ else
       -e "s#access_key: paperless#access_key: ${RUSTFS_ACCESS_KEY}#" \
       -e "s#secret_key: paperless-dev-secret#secret_key: ${RUSTFS_SECRET_KEY}#" \
       -e 's#"warden:9743"#"warden:9843"#' \
+      -e "s#^trust_domain: example\.org\$#trust_domain: ${TRUST_DOMAIN}#" \
+      -e "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" \
       "$f"
     case "$s" in
       ticket|dns)
@@ -209,6 +217,15 @@ if grep -nE 'localhost:8443|sslmode=disable|:dev@|password: dev|dev-openfga-key|
   die "development values left in prod/configs (see above)"
 fi
 
+# --- trust domain -------------------------------------------------------------
+# Kept configs (no FORCE=1) must already use TRUST_DOMAIN: a mixed mesh does
+# not start. PRODUCTION.md, "Trust domain", covers changing it on a running stack.
+bad=$(grep -LE "^trust_domain: ${TRUST_DOMAIN//./\\.}\$" prod/configs/*.yaml || true)
+[ -z "$bad" ] || die "trust_domain differs from TRUST_DOMAIN=${TRUST_DOMAIN} in: $(echo $bad) (PRODUCTION.md, \"Trust domain\")"
+if grep -n 'spiffe://' prod/configs/*.yaml | grep -v "spiffe://${TRUST_DOMAIN}/"; then
+  die "SPIFFE ids outside TRUST_DOMAIN=${TRUST_DOMAIN} in prod/configs (see above)"
+fi
+
 # --- .env ---------------------------------------------------------------------
 [ -f .env ] || cp .env.example .env
 set_env() { # <key> <value>
@@ -222,6 +239,7 @@ set_env() { # <key> <value>
 for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY; do set_env "$k" "${!k}"; done
 set_env PUBLIC_HOST "$PUBLIC_HOST"
 set_env PUBLIC_ORIGIN "$ORIGIN"
+set_env TRUST_DOMAIN "$TRUST_DOMAIN"
 chmod 0600 .env
-echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN)"
+echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN)"
 echo "next: put the public certificate in prod/edge/ (tls.crt, tls.key) and follow PRODUCTION.md"

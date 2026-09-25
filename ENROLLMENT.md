@@ -91,7 +91,7 @@ Do the same as `notification`:
    <svc>-token:
      image: ghcr.io/go-tangra/go-tangra-auth:${TANGRA_VERSION:-4.0.0}
      command: ["mint-enrollment-token","-config","deploy/container.yaml",
-       "-spiffe","spiffe://example.org/svc/<svc>","-ttl","30m","-out","/tokens/<svc>.token"]
+       "-spiffe","spiffe://<trust-domain>/svc/<svc>","-ttl","30m","-out","/tokens/<svc>.token"]
      volumes: ["tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
      depends_on: { auth-bootstrap: { condition: service_completed_successfully }, ... }
    <svc>:
@@ -106,13 +106,13 @@ Do the same as `notification`:
    register. Add it to the `gateway-bootstrap` command in
    `docker-compose.yaml` (`scripts/apply-allow.sh` re-runs that job):
    ```
-   -allow 'spiffe://example.org/svc/<svc>=/api/<svc>[,/extra/prefix];<svc>'
+   -allow 'spiffe://<trust-domain>/svc/<svc>=/api/<svc>[,/extra/prefix];<svc>'
    ```
    Note the allow-list is idempotent **per SPIFFE id**; to change prefixes on an
    existing row, update it directly:
    ```sh
    docker exec freya-stack-timescaledb-1 psql -U postgres -d gateway \
-     -c "UPDATE allow_list SET prefixes = ARRAY['/api/<svc>'] WHERE spiffe_id='spiffe://example.org/svc/<svc>' AND revoked_at IS NULL;"
+     -c "UPDATE allow_list SET prefixes = ARRAY['/api/<svc>'] WHERE spiffe_id='spiffe://<trust-domain>/svc/<svc>' AND revoked_at IS NULL;"
    ```
    A module must NOT claim the shared `/ui` prefix or a `/ui` edge route — its
    remote is relayed via `/m/<svc>/`.
@@ -121,7 +121,7 @@ Do the same as `notification`:
 
 ```sh
 docker exec freya-stack-auth-1 authsvc mint-enrollment-token \
-  -config deploy/container.yaml -spiffe spiffe://example.org/svc/<svc> -ttl 30m
+  -config deploy/container.yaml -spiffe spiffe://<trust-domain>/svc/<svc> -ttl 30m
 ```
 Tenant defaults to the mesh tenant so the SVID chains to the mesh root. In
 production the gateway/console mints these (auth `MintEnrollmentToken`, policed
