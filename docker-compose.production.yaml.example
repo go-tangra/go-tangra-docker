@@ -158,6 +158,9 @@ services:
 
   # ---------------------------------------------------------------- gateway
   gateway-bootstrap:
+    # prod/configs/*.yaml are 0600 root (they hold database passwords); every
+    # service that reads them runs as root, like the other tangra containers.
+    user: "0:0"
     environment: *tangra-env
     volumes:
       - "./prod/configs/gateway.yaml:/app/deploy/container.yaml:ro"
