@@ -33,4 +33,4 @@ vault:
   allow_plaintext: true
 gateway: { service: gateway, issuer: https://localhost:8443 }
 share: { public_origin: https://localhost:8443 }
-mail: { transport: smtp, host: mailpit, port: 1025, from: warden@example.org, allow_plaintext: true }
+mail: { transport: notification }    # mail goes out through notification (platform_email)

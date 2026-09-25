@@ -20,6 +20,7 @@
 #   prod/init-db.sql       init-db.sql with one generated password per role
 #   prod/configs/<svc>.yaml  configs/<svc>.yaml with the production settings
 #   prod/policies/<svc>.yaml policies/<svc>.yaml for TRUST_DOMAIN (always rewritten)
+#   prod/secrets/smtp.password         SMTP password for notification's platform relay (may be empty)
 #   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
 #   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
 #
@@ -76,7 +77,7 @@ SMTP_PASSWORD="${SMTP_PASSWORD:-}"
 case "$SMTP_PORT" in
   465) SMTP_TLS=implicit ;;
   587) SMTP_TLS=starttls ;;
-  *) die "SMTP_PORT must be 465 (implicit TLS) or 587 (STARTTLS): auth and warden accept only these ports with TLS" ;;
+  *) die "SMTP_PORT must be 465 (implicit TLS) or 587 (STARTTLS): the platform relay (notification) and ticket require TLS" ;;
 esac
 [[ "$PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "PUBLIC_HOST must be a bare DNS name"
 [[ "$TRUST_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "TRUST_DOMAIN must be a lowercase DNS name (no scheme, port or path)"
@@ -119,7 +120,8 @@ for s in $KEK_SERVICES; do
   fi
 done
 
-# --- ticket SMTP password file (file: reference, see PRODUCTION.md) ---------
+# --- SMTP password files (notification platform_email, ticket) --------------
+printf '%s' "$SMTP_PASSWORD" > prod/secrets/smtp.password
 printf '%s' "$SMTP_PASSWORD" > prod/secrets/ticket-smtp.password
 
 # --- database roles ----------------------------------------------------------
@@ -143,11 +145,6 @@ replace_line() { # <file> <awk regex> <replacement line(s)>
 if [ -d prod/configs ] && [ -n "$(ls -A prod/configs)" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "prod/configs exists; keeping it (FORCE=1 regenerates it from configs/ and discards manual edits)"
 else
-  if [ -n "$SMTP_USERNAME" ]; then
-    MAIL_AUTH=", username: $(yq_str "$SMTP_USERNAME"), password: $(yq_str "$SMTP_PASSWORD")"
-  else
-    MAIL_AUTH=""
-  fi
   for s in $SERVICES; do
     f="prod/configs/$s.yaml"
     cp "configs/$s.yaml" "$f"
@@ -189,13 +186,21 @@ else
   done
   f=prod/configs/auth.yaml
   replace_line "$f" '^openfga:' "openfga: { url: https://openfga:8080, preshared_key: ${OPENFGA_PRESHARED_KEY}, allow_plaintext: false }"
-  replace_line "$f" '^email:' "email: { transport: smtp, host: ${SMTP_HOST}, port: ${SMTP_PORT}${MAIL_AUTH}, from: $(yq_str "$MAIL_FROM"), allow_plaintext: false }"
   replace_line "$f" '^    allow_cidrs: \["172\.31\.250\.2/32"\]$' '    allow_cidrs: []'
   f=prod/configs/warden.yaml
   replace_line "$f" '^  address: http://vault:8200$' '  address: https://vault:8200'
   replace_line "$f" '^  allow_plaintext: true$' $'  allow_plaintext: false\n  ca_file: /tls/ca.crt'
-  replace_line "$f" '^mail:' "mail: { transport: smtp, host: ${SMTP_HOST}, port: ${SMTP_PORT}${MAIL_AUTH}, from: $(yq_str "$MAIL_FROM"), allow_plaintext: false }"
-  replace_line prod/configs/notification.yaml '^smtp:' 'smtp: { allow_plaintext: false, dial_timeout_seconds: 30 }'
+  f=prod/configs/notification.yaml
+  replace_line "$f" '^smtp:' 'smtp: { allow_plaintext: false, dial_timeout_seconds: 30 }'
+  # The platform relay: auth and warden send through notification. The relay
+  # certificate must match SMTP_HOST (a host name, not an IP address).
+  if [ -n "$SMTP_USERNAME" ]; then
+    PLATFORM_AUTH=$'\n  username: '"$(yq_str "$SMTP_USERNAME")"$'\n  password_file: /run/secrets/smtp.password'
+  else
+    PLATFORM_AUTH=""
+  fi
+  sed -i -E '/^platform_email:/,/^[a-z_]+:/ { /^platform_email:/!{ /^  /d } }' "$f"
+  replace_line "$f" '^platform_email:$' "platform_email:"$'\n'"  host: ${SMTP_HOST}"$'\n'"  port: ${SMTP_PORT}"$'\n'"  tls: ${SMTP_TLS}${PLATFORM_AUTH}"$'\n'"  from: $(yq_str "$MAIL_FROM")"$'\n'"  allow_plaintext: false"
   replace_line prod/configs/lcm.yaml '^acme:' 'acme: { allow_plaintext_dns: false }'
   # inventory ingest edge (agents): TLS with the public edge certificate.
   replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }'

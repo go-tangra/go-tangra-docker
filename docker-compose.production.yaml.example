@@ -232,6 +232,8 @@ services:
     volumes:
       - "./prod/keys/notification.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/notification.yaml:/app/deploy/container.yaml:ro"
+      # platform_email.password_file (the platform's outbound relay).
+      - "./prod/secrets/smtp.password:/run/secrets/smtp.password:ro"
       - "./prod/policies/notification.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   warden:

@@ -18,7 +18,7 @@ db:
 valkey: { addresses: ["valkey:6379"], username: auth, password: dev, allow_plaintext: true }
 openfga: { url: http://openfga:8080, preshared_key: dev-openfga-key, allow_plaintext: true }
 kek: { source: file, path: deploy/dev-kek.b64 }
-email: { transport: smtp, host: mailpit, port: 1025, from: auth@example.org, allow_plaintext: true }
+email: { transport: notification }   # mail goes out through notification (platform_email)
 profile: { avatar_max_bytes: 2097152, avatar_size: 512 }
 limits: { max_request_bytes: 2162688 }
 # LDAP import (feature 016). TLS only (ldaps:// or StartTLS). deny_cidrs refuses

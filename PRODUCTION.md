@@ -235,6 +235,7 @@ It creates `prod/` (git-ignored, mode 0700/0600):
 | `prod/keys/<svc>.kek` | Fresh key-encryption keys (section 4.3). Generated once, never replaced. |
 | `prod/init-db.sql` | `init-db.sql` with the generated role passwords. |
 | `prod/configs/<svc>.yaml` | Copies of `configs/` with the production settings below. Rewritten only with `FORCE=1`. |
+| `prod/secrets/smtp.password` | Relay password for notification's `platform_email` (`password_file: /run/secrets/smtp.password`). |
 | `prod/secrets/ticket-smtp.password` | Relay password for ticket (`smtp.password_ref: file:/run/secrets/smtp.password`). |
 | `prod/edge/` | Empty: put the public certificate here (section 4.5). |
 | `prod/policies/<svc>.yaml` | `policies/<svc>.yaml` with `TRUST_DOMAIN`; rewritten on every run (section 4.12). |
@@ -255,10 +256,12 @@ Changes it makes in `prod/configs/`:
   and `insecure: false` (section 4.10). The gateway enrolls at lcm with
   `ca_file: /certs/ca.pem` instead of `insecure` (section 4.10).
 - auth: `openfga: { url: https://openfga:8080, ..., allow_plaintext: false }`,
-  real `email`, directory `allow_cidrs: []` (the test LDAP address is gone).
+  `email: { transport: notification }`, directory `allow_cidrs: []` (the test
+  LDAP address is gone).
 - warden: `vault.address: https://vault:8200`, `allow_plaintext: false`,
-  `ca_file: /tls/ca.crt`; real `mail`.
-- notification `smtp.allow_plaintext: false`; lcm `acme.allow_plaintext_dns: false`;
+  `ca_file: /tls/ca.crt`; `mail: { transport: notification }`.
+- notification `smtp.allow_plaintext: false`, `platform_email` from `SMTP_*`
+  (section 4.6); lcm `acme.allow_plaintext_dns: false`;
   inventory `ingest.insecure: false`.
 - paperless/asset/ticket `object_store`: `use_ssl: true`, generated keys.
 - ticket `smtp`: real relay, `tls: starttls` (587) or `implicit` (465),
@@ -398,18 +401,62 @@ there is no DKIM code in any service - your relay must sign):
 - **Reverse DNS**: the relay's sending IP has a PTR matching its HELO name (your
   provider's job if you use a hosted relay).
 
-Where each service is configured (all verified in code):
+**One relay for the platform (notification ≥ 4.2.0, auth/warden ≥ 4.2.0).**
+The platform's outbound mail - invitations, account resets, password recovery
+(auth) and share links (warden) - goes through the notification module. The
+relay is configured once, in `prod/configs/notification.yaml`:
+
+```yaml
+platform_email:
+  host: mx01.example.net          # a HOST NAME that matches the relay certificate
+  port: 587                       # 587 = STARTTLS, 465 = implicit TLS
+  tls: starttls
+  username: 'tangra@example.net'  # omit (with password_file) for an IP-allow-listed relay
+  password_file: /run/secrets/smtp.password   # overlay mounts prod/secrets/smtp.password
+  from: 'tangra@example.net'
+  allow_plaintext: false
+```
+
+At every start notification turns this into the **Platform email** channel
+(Notification -> channels, marked *Managed*: read-only, test send allowed).
+auth and warden have no relay settings (`email`/`mail: { transport:
+notification }`); old relay keys there are ignored with a start-up warning.
+The wording of the mails is editable under Notification -> templates
+(`auth.invite`, `auth.account_reset`, `auth.recovery`, `warden.share`; *System*
+templates can be restored to the built-in text). Links in those mails are
+stored as `[redacted]` in the notification log.
+
+TLS rules: the certificate is verified against `host` - use the relay's name
+(e.g. `mx01.kumo.example.net` for a `*.kumo.example.net` certificate), never
+its IP address; add an `extra_hosts` entry to notification if that name does
+not resolve inside the containers. STARTTLS never falls back to plaintext.
+`tls: none` needs `allow_plaintext: true` (warned at every start) and cannot be
+combined with a username.
+
+Verify delivery: Notification -> channels -> Platform email -> **Test**, then
+invite a user; the notification log shows the entry (`sent` / the relay's
+reason). auth keeps undelivered invitations queued and retries with backoff
+(30 s doubling up to 1 h); a message that can never be sent is reported once
+(`email_given_up`).
 
 | Service | What it sends | Settings | TLS rules |
 |---|---|---|---|
-| auth | operator/user invitations, recovery | `email: { transport: smtp, host, port, username, password, from, allow_plaintext }` in `prod/configs/auth.yaml` | port **465** = implicit TLS, **587** = STARTTLS; any other port only with `allow_plaintext` (refused in production). The password is plain text in the config file (no secret reference). |
-| warden | share links | `mail: { ... }` in `prod/configs/warden.yaml`, same fields and rules as auth | as auth |
-| notification | tenant email channels | **per channel in the UI** (Notification -> channels: host, port, `tls: implicit/starttls/none`, username, password (sealed with the notification KEK), from, reply-to); the config only has `smtp.allow_plaintext` (refuses `tls: none` channels when false) | `tls: none` refused while `smtp.allow_plaintext: false` |
+| notification | platform mail (above) and tenant email channels | `platform_email` in the config; tenant channels **per channel in the UI** (host, port, `tls: implicit/starttls/none`, username, password sealed with the notification KEK, from, reply-to); `smtp.allow_plaintext` refuses `tls: none` tenant channels | as above |
 | ticket | public replies, acknowledgements | `smtp: { host, port, tls: implicit/starttls, allow_plaintext: false, username, password_ref, mail_domain, timeout_seconds }`. From = the mailbox address. `password_ref: file:/run/secrets/smtp.password` (the overlay mounts `prod/secrets/ticket-smtp.password`) | `tls: none` refused in production; PLAIN auth only over TLS |
 
-`prod-init.sh` fills auth, warden and ticket from `SMTP_*`/`MAIL_FROM`. Without
-`smtp.host`, ticket refuses public replies (`reply_unavailable`) and skips
-acknowledgements.
+`prod-init.sh` fills notification's `platform_email` and ticket from
+`SMTP_*`/`MAIL_FROM` (password into `prod/secrets/smtp.password` and
+`prod/secrets/ticket-smtp.password`). Without `smtp.host`, ticket refuses
+public replies (`reply_unavailable`) and skips acknowledgements.
+
+**Upgrading an installation that still has relay settings in auth/warden**:
+copy host, port, username and from from `prod/configs/auth.yaml` (`email:`)
+into `platform_email` in `prod/configs/notification.yaml` (tls: `starttls` for
+587, `implicit` for 465), write the password to `prod/secrets/smtp.password`
+(`install -m 0600`), set `email: { transport: notification }` in auth and
+`mail: { transport: notification }` in warden, add the secret mount to
+notification in `docker-compose.override.yaml`, then upgrade notification
+first and auth/warden after it.
 
 ### 4.7 Vault (warden's secret store)
 
@@ -927,8 +974,8 @@ Valkey and job workers use database leases, but it is untested here).
   loopback-only inside containers. Valkey, TimescaleDB, OpenFGA, Vault, RustFS
   are unpublished and TLS-only.
 - **Secrets at rest on the host**: `prod/` (0600), `.env` (0600, written by
-  `prod-init.sh`). auth/warden SMTP passwords and the Valkey/database passwords
-  are plain text in `prod/configs` - protect the directory and its backups.
+  `prod-init.sh`). The relay passwords (`prod/secrets/`) and the Valkey/database
+  passwords are plain text on the host - protect `prod/` and its backups.
 - **Superuser for migrations**: `migrate_dsn` uses `postgres`; the runtime
   `dsn` uses the per-service `<svc>_app` role (`NOBYPASSRLS`, row-level
   security).
@@ -944,6 +991,7 @@ Valkey and job workers use database leases, but it is untested here).
 |---|---|
 | A service exits with `config: ...` | `Validate()` refused a setting; the message names the key (section 4.1). |
 | `gateway-bootstrap`: `config: open deploy/container.yaml: permission denied` | `prod/configs/*.yaml` are `0600 root`; a job that runs as the image's non-root user cannot read them. The overlay runs `gateway-bootstrap` as `0:0` (pull the latest overlay and copy it to `docker-compose.override.yaml` again). |
+| Invitations/share mails not arriving; notification log entry `failed` with `x509: cannot validate certificate for <ip> because it doesn't contain any IP SANs` (or `certificate is valid for *.example.net, not ...`) | `platform_email.host` must be the relay's certificate name, not its IP: check with `openssl s_client -starttls smtp -connect <ip>:587 </dev/null \| openssl x509 -noout -subject -ext subjectAltName`, set `host` to a matching name, add `extra_hosts: ["<name>:<ip>"]` to notification if the name does not resolve, `docker compose restart notification`. Queued invitations are retried automatically. |
 | After a trust domain change: gateway `enroll: http 403 {"reason":"forbidden"}` with a fresh token, or services refusing each other (`PermissionDenied`) | The images' built-in `deploy/policy.yaml` only admit `spiffe://example.org/...` callers (auth refuses lcm's token check, so lcm answers 403). Run `./scripts/prod-init.sh` (writes `prod/policies/`), make sure `docker-compose.override.yaml` mounts `./prod/policies/<svc>.yaml:/app/deploy/policy.yaml:ro` for every service (current overlay example), then `docker compose up -d`. |
 | Gateway exits: `config: enroll.insecure is refused in production; set enroll.ca_file ...` | Portal 4.2.0+ verifies lcm on first enrollment. In `prod/configs/gateway.yaml` replace `  insecure: true` under `enroll:` with `  ca_file: /certs/ca.pem`, and make sure the gateway mounts the `certs` volume (`certs:/certs:ro`, in the current base `docker-compose.yaml.example`; refresh your `docker-compose.yaml`). The reverse error, `field ca_file not found`, means an older portal image: use `GATEWAY_IMAGE=...go-tangra-portal:4.2.0`. |
 | Inventory restarts: `registry valkey: ... connection reset by peer`, Valkey logs `SSL routines::wrong version number` | Inventory 4.0.0 connected its registry to Valkey without TLS. Use inventory 4.1.0 or later (`INVENTORY_IMAGE` / `TANGRA_VERSION`). 4.1.0 also serves the agent ingest edge over TLS and refuses to start without its certificate: in an existing `prod/configs/inventory.yaml` set `ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }` and mount `./prod/edge:/edge:ro` into inventory (current overlay does). |

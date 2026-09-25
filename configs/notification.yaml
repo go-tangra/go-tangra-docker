@@ -29,5 +29,14 @@ db:
 valkey: { addresses: ["valkey:6379"], username: notification, password: dev, allow_plaintext: true }
 kek: { source: file, path: deploy/kek.dev }
 smtp: { allow_plaintext: true, dial_timeout_seconds: 30 }
+# The platform's outbound email (invitations, recovery, share links): auth and
+# warden send through notification, which keeps this relay as the managed
+# "Platform email" channel. Development: Mailpit without TLS.
+platform_email:
+  host: mailpit
+  port: 1025
+  tls: none
+  allow_plaintext: true
+  from: tangra@example.org
 scheduler: { interval_seconds: 15, lease_seconds: 60 }
 gateway: { service: gateway, issuer: https://localhost:8443 }
