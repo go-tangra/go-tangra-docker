@@ -620,13 +620,18 @@ done
 docker compose exec timescaledb psql -U postgres -d gateway -c \
   "UPDATE allow_list SET revoked_at = now() WHERE spiffe_id LIKE 'spiffe://example.org/%' AND revoked_at IS NULL;"
 
+# 4b. free the issuer name "mesh" for the new domain (lcm up to 4.0.0 always
+#     names the mesh issuer "mesh", and names are unique)
+docker compose exec timescaledb psql -U postgres -d lcm -c \
+  "UPDATE issuers SET name = 'mesh-example.org' WHERE lower(name) = 'mesh' AND trust_domain = 'example.org';"
+
 # 5. start: lcm-bootstrap creates the new root and file SVIDs, the *-token jobs
 #    mint tokens for the new ids, gateway-bootstrap seeds the allow-list
 docker compose up -d
 docker compose logs gateway auth lcm --since 5m | grep -i 'trust\|x509\|refused' | head
 ```
 
-Replace `example.org` in steps 2 and 4 when moving away from another trust
+Replace `example.org` in steps 2, 4 and 4b when moving away from another trust
 domain. The old root stays in the lcm database, unused. Step 3 is needed
 because services up to lcm sdk 4.0.0 reuse a saved SVID without checking its
 identity.
