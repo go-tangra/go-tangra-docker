@@ -1,0 +1,22 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-asset:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for asset: the gateway forwards browser traffic
+# and probes health; the asset.v1 gRPC surface (asset/category/supplier/location/
+# consumable/license/insurance/system/backup) is called by other modules directly.
+# asset calls the inventory module (inventory-sync), auth (user directory) and warden
+# (object-store secret refs) as a client. No host-touching operations.
+version: asset-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["asset"]
+    operations: ["*"]
+    effect: allow
+  - id: modules-read
+    from: ["spiffe://example.org/svc/*"]
+    to: ["asset"]
+    operations: ["/asset.v1.AssetService/GetAsset", "/asset.v1.AssetService/ListAssets", "/asset.v1.CategoryService/GetCategoryTree",
+      "/asset.v1.SupplierService/ListSuppliers", "/asset.v1.LocationService/GetLocationTree", "/asset.v1.SystemService/Health",
+      "/asset.v1.SystemService/GetDashboardStats", "/grpc.health.v1.Health/Check"]
+    effect: allow

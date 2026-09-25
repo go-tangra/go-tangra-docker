@@ -1,0 +1,53 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-auth:4.0.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for the auth service: platform services may
+# read keys, revocations and ask for decisions; only registered services may
+# register permissions (tighten per deployment).
+version: auth-dev-1
+rules:
+  - id: services-verify
+    from: ["spiffe://example.org/svc/*"]
+    to: ["auth"]
+    operations: ["/auth.v1.Keys/List", "/auth.v1.Sessions/RevokedSince", "/auth.v1.Sessions/Watch", "/auth.v1.Authorization/Check", "/auth.v1.Authorization/BatchCheck", "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: services-register
+    from: ["spiffe://example.org/svc/*"]
+    to: ["auth"]
+    operations: ["/auth.v1.Authorization/RegisterPermissions", "/auth.v1.Sessions/Introspect"]
+    effect: allow
+  - id: notification-directory
+    from: ["spiffe://example.org/svc/notification"]
+    to: ["auth"]
+    operations: ["/auth.v1.Profiles/Lookup", "/auth.v1.Profiles/ListMembers"]
+    effect: allow
+  - id: asset-directory
+    from: ["spiffe://example.org/svc/asset"]
+    to: ["auth"]
+    operations: ["/auth.v1.Profiles/Lookup", "/auth.v1.Profiles/ListMembers"]
+    effect: allow
+  - id: ticket-directory
+    from: ["spiffe://example.org/svc/ticket"]
+    to: ["auth"]
+    operations: ["/auth.v1.Profiles/Lookup", "/auth.v1.Profiles/ListMembers"]
+    effect: allow
+  - id: gateway-exchange
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["auth"]
+    operations: ["/auth.v1.Sessions/Exchange", "/auth.v1.Sessions/MintToken"]
+    effect: allow
+  - id: lcm-enrollment-verify
+    from: ["spiffe://example.org/svc/lcm"]
+    to: ["auth"]
+    operations: ["/auth.v1.Enrollment/VerifyEnrollmentToken"]
+    effect: allow
+  - id: gateway-enrollment-mint
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["auth"]
+    operations: ["/auth.v1.Enrollment/MintEnrollmentToken"]
+    effect: allow
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["auth"]
+    operations: ["*"]
+    effect: allow

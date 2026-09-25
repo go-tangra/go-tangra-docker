@@ -19,6 +19,7 @@
 #   prod/keys/<svc>.kek    fresh 32-byte base64 key-encryption keys (0600)
 #   prod/init-db.sql       init-db.sql with one generated password per role
 #   prod/configs/<svc>.yaml  configs/<svc>.yaml with the production settings
+#   prod/policies/<svc>.yaml policies/<svc>.yaml for TRUST_DOMAIN (always rewritten)
 #   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
 #   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
 #
@@ -220,6 +221,17 @@ chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets
 if grep -nE 'localhost:8443|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|warden:9743' prod/configs/*.yaml; then
   die "development values left in prod/configs (see above)"
 fi
+
+# --- service-to-service policies (regenerated every run) ----------------------
+# Each image carries deploy/policy.yaml naming spiffe://example.org/... callers;
+# the overlay mounts these TRUST_DOMAIN copies over them.
+mkdir -p prod/policies
+for s in $SERVICES; do
+  sed "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" "policies/$s.yaml" > "prod/policies/$s.yaml"
+done
+chmod 0644 prod/policies/*.yaml
+if grep -n 'example\.org' prod/policies/*.yaml | grep -v ':#'; then die "prod/policies still name example.org (see above)"; fi
+echo "wrote prod/policies/*.yaml (trust domain ${TRUST_DOMAIN})"
 
 # --- trust domain -------------------------------------------------------------
 # Kept configs (no FORCE=1) must already use TRUST_DOMAIN: a mixed mesh does

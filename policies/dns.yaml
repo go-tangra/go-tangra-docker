@@ -1,0 +1,30 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-dns:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for dns (PowerDNS management plane): the
+# gateway forwards browser traffic and probes health; any platform module may
+# read the zones of the tenant named in a request (dns.v1.Zones); the ACME
+# DNS-01 challenge methods (dns.v1.Challenges) are reserved to the certificate
+# service (lcm) — the handler re-checks the exact peer identity as well
+# (research D12, SR-005). dns itself calls auth, warden and ipam as a client;
+# those rules live in the callee's policy.
+version: dns-dev-1
+rules:
+  # The gateway proxies only the browser HTTP API (the manifest declares no
+  # gRPC methods), so it is limited to HTTP operations ("METHOD /path") and
+  # can never reach dns.v1.Challenges.
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["dns"]
+    operations: ["GET *", "HEAD *", "POST *", "PUT *", "PATCH *", "DELETE *", "OPTIONS *"]
+    effect: allow
+  - id: lcm-acme-challenges
+    from: ["spiffe://example.org/svc/lcm"]
+    to: ["dns"]
+    operations: ["/dns.v1.Challenges/Present", "/dns.v1.Challenges/CleanUp"]
+    effect: allow
+  - id: modules-zones
+    from: ["spiffe://example.org/svc/*"]
+    to: ["dns"]
+    operations: ["/dns.v1.Zones/List", "/dns.v1.Zones/Get", "/dns.v1.Zones/FindForName", "/grpc.health.v1.Health/Check"]
+    effect: allow

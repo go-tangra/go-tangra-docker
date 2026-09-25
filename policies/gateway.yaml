@@ -1,0 +1,11 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-portal:4.2.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for the gateway.
+version: gateway-dev-1
+rules:
+  - id: modules-register
+    from: ["spiffe://example.org/svc/*"]
+    to: ["gateway"]
+    operations: ["/gateway.v1.Registry/Register", "/gateway.v1.Registry/Renew", "/gateway.v1.Registry/Deregister", "/gateway.v1.Registry/Watch", "/grpc.health.v1.Health/Check"]
+    effect: allow

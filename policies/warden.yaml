@@ -1,0 +1,19 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-warden:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for warden: the gateway forwards browser
+# traffic and gRPC ingress; health probes come from the gateway too.
+version: warden-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["warden"]
+    operations: ["*"]
+    effect: allow
+  # ticket resolves its relay-token / SMTP-password references at use time. The
+  # call still carries a platform token and passes warden's per-secret check.
+  - id: ticket-secrets
+    from: ["spiffe://example.org/svc/ticket"]
+    to: ["warden"]
+    operations: ["/warden.v1.Secrets/GetPassword"]
+    effect: allow

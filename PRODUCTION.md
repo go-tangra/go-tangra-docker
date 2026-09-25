@@ -238,6 +238,7 @@ It creates `prod/` (git-ignored, mode 0700/0600):
 | `prod/configs/<svc>.yaml` | Copies of `configs/` with the production settings below. Rewritten only with `FORCE=1`. |
 | `prod/secrets/ticket-smtp.password` | Relay password for ticket (`smtp.password_ref: file:/run/secrets/smtp.password`). |
 | `prod/edge/` | Empty: put the public certificate here (section 4.5). |
+| `prod/policies/<svc>.yaml` | `policies/<svc>.yaml` with `TRUST_DOMAIN`; rewritten on every run (section 4.12). |
 
 It also writes those compose credentials and `PUBLIC_HOST` into `.env`.
 
@@ -591,7 +592,10 @@ involved).
 
 `TRUST_DOMAIN` in `.env` is a required `prod-init.sh` input (`example.org` is
 refused). The script writes it into every `prod/configs/*.yaml`
-(`trust_domain`, dns `acme.allowed_caller`) and into `.env`, where the gateway
+(`trust_domain`, dns `acme.allowed_caller`), into `prod/policies/*.yaml` (the
+service-to-service policies: every image ships a `deploy/policy.yaml` naming
+`spiffe://example.org/...` callers, and the overlay mounts these copies over
+it; `policies/` holds the copies from the current releases) and into `.env`, where the gateway
 allow-list (`gateway-bootstrap`) and the `*-token` jobs of the base compose
 file pick it up. A re-run refuses kept configs whose trust domain differs from
 `TRUST_DOMAIN`. Choose it before the first start.
@@ -617,6 +621,10 @@ grep -n 'example\.org' prod/configs/*.yaml | grep -v '@'   # expect no output
 grep -q '^TRUST_DOMAIN=' .env && sed -i "s#^TRUST_DOMAIN=.*#TRUST_DOMAIN=${NEW}#" .env \
   || echo "TRUST_DOMAIN=${NEW}" >> .env
 docker compose config | grep -c "spiffe://${NEW}/"          # allow-list + token jobs
+
+# 2b. service-to-service policies for the new domain (keeps configs and
+#     credentials; the overlay must mount prod/policies - current example does)
+./scripts/prod-init.sh
 
 # 3. drop the persisted SVIDs of the old trust domain (services enroll afresh)
 for v in $(docker volume ls -q --filter "label=com.docker.compose.project=$P" | grep -- '-state$'); do
@@ -937,6 +945,7 @@ Valkey and job workers use database leases, but it is untested here).
 |---|---|
 | A service exits with `config: ...` | `Validate()` refused a setting; the message names the key (section 4.1). |
 | `gateway-bootstrap`: `config: open deploy/container.yaml: permission denied` | `prod/configs/*.yaml` are `0600 root`; a job that runs as the image's non-root user cannot read them. The overlay runs `gateway-bootstrap` as `0:0` (pull the latest overlay and copy it to `docker-compose.override.yaml` again). |
+| After a trust domain change: gateway `enroll: http 403 {"reason":"forbidden"}` with a fresh token, or services refusing each other (`PermissionDenied`) | The images' built-in `deploy/policy.yaml` only admit `spiffe://example.org/...` callers (auth refuses lcm's token check, so lcm answers 403). Run `./scripts/prod-init.sh` (writes `prod/policies/`), make sure `docker-compose.override.yaml` mounts `./prod/policies/<svc>.yaml:/app/deploy/policy.yaml:ro` for every service (current overlay example), then `docker compose up -d`. |
 | Gateway exits: `config: enroll.insecure is refused in production; set enroll.ca_file ...` | Portal 4.2.0+ verifies lcm on first enrollment. In `prod/configs/gateway.yaml` replace `  insecure: true` under `enroll:` with `  ca_file: /certs/ca.pem`, and make sure the gateway mounts the `certs` volume (`certs:/certs:ro`, in the current base `docker-compose.yaml.example`; refresh your `docker-compose.yaml`). The reverse error, `field ca_file not found`, means an older portal image: use `GATEWAY_IMAGE=...go-tangra-portal:4.2.0`. |
 | Inventory restarts: `registry valkey: ... connection reset by peer`, Valkey logs `SSL routines::wrong version number` | Inventory 4.0.0 connected its registry to Valkey without TLS. Use inventory 4.1.0 or later (`INVENTORY_IMAGE` / `TANGRA_VERSION`). 4.1.0 also serves the agent ingest edge over TLS and refuses to start without its certificate: in an existing `prod/configs/inventory.yaml` set `ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }` and mount `./prod/edge:/edge:ro` into inventory (current overlay does). |
 | Gateway: `edge: cert: open /edge/tls.crt: no such file or directory` although `prod/edge/tls.crt` exists | `prod/edge/` holds **symlinks** (e.g. into `/etc/letsencrypt/archive/`). Only `prod/edge` is mounted, so the link targets do not exist inside the container. Copy the files instead: `install -m 0644 fullchain.pem prod/edge/tls.crt` and `install -m 0600 privkey.pem prod/edge/tls.key` (the certbot deploy hook in section 4.5 does exactly this on every renewal). |

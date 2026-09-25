@@ -150,6 +150,7 @@ services:
     volumes: !override
       - "./prod/keys/lcm.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/lcm.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/lcm.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
     depends_on: !override
       timescaledb: { condition: service_healthy }
@@ -189,6 +190,7 @@ services:
     environment: *tangra-env
     volumes:
       - "./prod/configs/gateway.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/gateway.yaml:/app/deploy/policy.yaml:ro"
       - "./prod/edge:/edge:ro"
       - *tangra-tls
     # Workloads enroll at https://${PUBLIC_HOST}:8443 so the first-enroll dial
@@ -204,6 +206,7 @@ services:
     volumes: &auth-volumes
       - "./prod/keys/auth.kek:/app/deploy/dev-kek.b64:ro"
       - "./prod/configs/auth.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/auth.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   auth:
     restart: unless-stopped
@@ -229,12 +232,14 @@ services:
     volumes:
       - "./prod/keys/notification.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/notification.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/notification.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   warden:
     restart: unless-stopped
     environment: *tangra-env
     volumes:
       - "./prod/configs/warden.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/warden.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   deployer:
     restart: unless-stopped
@@ -242,6 +247,7 @@ services:
     volumes:
       - "./prod/keys/deployer.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/deployer.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/deployer.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   paperless:
     restart: unless-stopped
@@ -249,6 +255,7 @@ services:
     volumes:
       - "./prod/keys/paperless.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/paperless.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/paperless.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   inventory:
     restart: unless-stopped
@@ -256,6 +263,7 @@ services:
     volumes:
       - "./prod/keys/inventory.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/inventory.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/inventory.yaml:/app/deploy/policy.yaml:ro"
       # Agent ingest edge certificate (ingest.tls_cert_file / tls_key_file).
       - "./prod/edge:/edge:ro"
       - *tangra-tls
@@ -265,6 +273,7 @@ services:
     volumes:
       - "./prod/keys/ipam.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/ipam.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/ipam.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   asset:
     restart: unless-stopped
@@ -272,6 +281,7 @@ services:
     volumes:
       - "./prod/keys/asset.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/asset.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/asset.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
   ticket:
     restart: unless-stopped
@@ -279,6 +289,7 @@ services:
     volumes:
       - "./prod/keys/ticket.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/ticket.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/ticket.yaml:/app/deploy/policy.yaml:ro"
       - "./prod/secrets/ticket-smtp.password:/run/secrets/smtp.password:ro"
       # Inbound mail edge certificate (inbound.tls_cert_file / tls_key_file).
       - "./prod/edge:/edge:ro"
@@ -300,6 +311,7 @@ services:
     volumes: !override
       - "./prod/keys/dns.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/dns.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/dns.yaml:/app/deploy/policy.yaml:ro"
       - "tokens:/tokens:ro"
       - "dns-state:/state"
       - "dns-secrets:/secrets:ro"

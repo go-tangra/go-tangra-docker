@@ -1,0 +1,22 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-ipam:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for ipam: the gateway forwards browser traffic
+# and probes health; the ipam.v1 gRPC surface (subnet/address/device/vlan/location/
+# group/scan/system) is called by other modules directly. ipam calls warden (secret
+# refs), auth and lcm as a client. Active network operations (scan/ping/SNMP/IPMI/KVM)
+# reach hosts on the lab network, NOT mesh peers.
+version: ipam-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["ipam"]
+    operations: ["*"]
+    effect: allow
+  - id: dns-ipam-sync
+    # The dns module re-reads addresses (and their subnet prefix) named by
+    # ipam.ip_address.* events before writing A/AAAA/PTR records (dns research D8).
+    from: ["spiffe://example.org/svc/dns"]
+    to: ["ipam"]
+    operations: ["/ipam.v1.IpAddressService/Get", "/ipam.v1.IpAddressService/Find", "/ipam.v1.SubnetService/Get"]
+    effect: allow
