@@ -150,7 +150,10 @@ Edit `.env`:
 
 ```sh
 COMPOSE_PROJECT_NAME=tangra        # prefixes containers/volumes; never change it later
-TANGRA_VERSION=4.0.0               # pin; all go-tangra services share it
+TANGRA_VERSION=4.1.0               # pin; the go-tangra services share it...
+AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.0.0          # ...except where a
+GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.2.0     # service's release
+INVENTORY_IMAGE=ghcr.io/go-tangra/go-tangra-inventory:4.1.1  # differs (.env.example)
 OPERATOR_EMAIL=ops@example.com     # first operator (invite goes here)
 TZ=Europe/Sofia
 EDGE_PORT=443
@@ -249,7 +252,8 @@ Changes it makes in `prod/configs/`:
   `share.public_origin`) -> `https://<PUBLIC_HOST>`; all must be identical, the
   token issuer is compared literally.
 - workload enrollment: `enroll_url: https://<PUBLIC_HOST>:8443/api/lcm/v1/enroll`
-  and `insecure: false` (section 4.10). The gateway keeps its own settings.
+  and `insecure: false` (section 4.10). The gateway enrolls at lcm with
+  `ca_file: /certs/ca.pem` instead of `insecure` (section 4.10).
 - auth: `openfga: { url: https://openfga:8080, ..., allow_plaintext: false }`,
   real `email`, directory `allow_cidrs: []` (the test LDAP address is gone).
 - warden: `vault.address: https://vault:8200`, `allow_plaintext: false`,
@@ -550,11 +554,14 @@ and the host name of `enroll_url`, so:
   resolves to the gateway inside the compose network (container port 8443) and
   the public certificate matches (verify on your first start: look for
   `identity ready` in each module's log);
-- the **gateway keeps `insecure: true`**: it enrolls directly at lcm's
-  keyless listener (`https://lcm:9947`), which presents lcm's own SVID. An SVID
-  has no DNS name and no public root, so the standard verification of that call
-  cannot succeed; the gateway config does not refuse it in production. The
-  exposure is the internal compose network during the gateway's first start.
+- the **gateway** enrolls directly at lcm's keyless listener
+  (`https://lcm:9947`), which presents lcm's own SVID (no DNS name, mesh root).
+  It verifies that SVID with the mesh trust bundle: `enroll.ca_file:
+  /certs/ca.pem` (written by `lcm-bootstrap` into the `certs` volume, which the
+  base compose file mounts into the gateway) and the expected id
+  `spiffe://<TRUST_DOMAIN>/svc/lcm` (`enroll.server_spiffe_id`, default).
+  Portal 4.2.0 and later refuse `enroll.insecure` in production; 4.0.x/4.1.x
+  do not know `ca_file` and refuse the config, so change both together.
 
 ### 4.11 ACME (Let's Encrypt) in lcm instead of Pebble
 
@@ -823,7 +830,7 @@ docker compose run --rm auth-bootstrap reset-user -config deploy/container.yaml 
 ```sh
 # 1. back up (section 5) - migrations are forward-only
 # 2. bump the version
-sed -i 's/^TANGRA_VERSION=.*/TANGRA_VERSION=4.0.1/' .env
+sed -i 's/^TANGRA_VERSION=.*/TANGRA_VERSION=4.1.0/' .env   # and any *_IMAGE pins
 docker compose pull
 docker compose up -d
 docker compose ps
@@ -930,6 +937,7 @@ Valkey and job workers use database leases, but it is untested here).
 |---|---|
 | A service exits with `config: ...` | `Validate()` refused a setting; the message names the key (section 4.1). |
 | `gateway-bootstrap`: `config: open deploy/container.yaml: permission denied` | `prod/configs/*.yaml` are `0600 root`; a job that runs as the image's non-root user cannot read them. The overlay runs `gateway-bootstrap` as `0:0` (pull the latest overlay and copy it to `docker-compose.override.yaml` again). |
+| Gateway exits: `config: enroll.insecure is refused in production; set enroll.ca_file ...` | Portal 4.2.0+ verifies lcm on first enrollment. In `prod/configs/gateway.yaml` replace `  insecure: true` under `enroll:` with `  ca_file: /certs/ca.pem`, and make sure the gateway mounts the `certs` volume (`certs:/certs:ro`, in the current base `docker-compose.yaml.example`; refresh your `docker-compose.yaml`). The reverse error, `field ca_file not found`, means an older portal image: use `GATEWAY_IMAGE=...go-tangra-portal:4.2.0`. |
 | Inventory restarts: `registry valkey: ... connection reset by peer`, Valkey logs `SSL routines::wrong version number` | Inventory 4.0.0 connected its registry to Valkey without TLS. Use inventory 4.1.0 or later (`INVENTORY_IMAGE` / `TANGRA_VERSION`). 4.1.0 also serves the agent ingest edge over TLS and refuses to start without its certificate: in an existing `prod/configs/inventory.yaml` set `ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }` and mount `./prod/edge:/edge:ro` into inventory (current overlay does). |
 | Gateway: `edge: cert: open /edge/tls.crt: no such file or directory` although `prod/edge/tls.crt` exists | `prod/edge/` holds **symlinks** (e.g. into `/etc/letsencrypt/archive/`). Only `prod/edge` is mounted, so the link targets do not exist inside the container. Copy the files instead: `install -m 0644 fullchain.pem prod/edge/tls.crt` and `install -m 0600 privkey.pem prod/edge/tls.key` (the certbot deploy hook in section 4.5 does exactly this on every renewal). |
 | `service "<name>" has neither an image nor a build context specified` | Compose is reading the production overlay on its own (for example it was copied to `docker-compose.yaml`). The overlay only adds to the base stack: `docker-compose.yaml` must be a copy of `docker-compose.yaml.example` and `docker-compose.override.yaml` a copy of `docker-compose.production.yaml.example`. |
@@ -959,13 +967,8 @@ Valkey and job workers use database leases, but it is untested here).
   hardened settings (TLS DSN, Valkey TLS, S3 TLS, SMTP TLS, inbound TLS); the
   secret files live in Docker volumes / `prod/secrets` (go-tangra-ticket T069,
   go-tangra-dns `deploy/README.md` "the warden gap").
-- **inventory ingest has no TLS listener.** `ingest.insecure: false` satisfies
-  production validation, but the ingest gRPC server
-  (`internal/app/app.go` `serveIngest`) always serves plaintext; agents with
-  `insecure: false` expect TLS. Put a TLS-terminating gRPC proxy in front of
-  port 9977 before exposing it (verify). **Inventory agent releases are not
-  published for v4 yet**, so there are no agents to enroll today.
-- **The gateway enrolls with `insecure: true`** (section 4.10).
+- **Inventory agent releases are not published for v4 yet**, so there are no
+  agents to enroll today (the ingest edge serves TLS since inventory 4.1.0).
 - **`docker-compose.yaml.example`: the `*-token` jobs do not mount the auth
   KEK.** With the 4.0.0 images (which contain no keys) they fail config
   validation on a fresh start. The production overlay mounts it; the

@@ -175,7 +175,11 @@ else
         replace_line "$f" '^env: dev$' 'env: dev  # production mode refuses file: secret refs - see PRODUCTION.md "Known limitations"' ;;
       *) replace_line "$f" '^env: dev$' 'env: production' ;;
     esac
-    if [ "$s" != gateway ] && grep -q '^  enroll_url: https://gateway:8443/' "$f"; then
+    if [ "$s" = gateway ]; then
+      # The gateway enrolls directly at lcm's keyless listener; verify lcm's
+      # SVID with the mesh bundle (portal 4.2.0+ refuses insecure in production).
+      replace_line "$f" '^  insecure: true$' '  ca_file: /certs/ca.pem'
+    elif grep -q '^  enroll_url: https://gateway:8443/' "$f"; then
       # Workloads enroll through the public edge name (a network alias of the
       # gateway) so the first-enroll TLS dial verifies the public certificate.
       sed -i -E -e "s#^  enroll_url: https://gateway:8443/#  enroll_url: https://${PUBLIC_HOST}:8443/#" \

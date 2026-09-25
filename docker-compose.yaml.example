@@ -1,5 +1,5 @@
 # go-tangra v4 platform stack, bootstrapped end to end by lcm as the CA.
-# Service images are pulled from ghcr.io/go-tangra/<repo>:${TANGRA_VERSION:-4.0.0}
+# Service images are pulled from ghcr.io/go-tangra/<repo>:${TANGRA_VERSION:-4.1.0}
 # (each service lives in its own go-tangra-<name> repository; the policy files
 # are baked into the images at /app/deploy). To run a service from a local
 # checkout instead, add a docker-compose.override.yaml (see README.md).
@@ -151,7 +151,7 @@ services:
   # its own identity from the same root at startup, so the whole mesh chains to
   # one root. Idempotent; needs the DB + KEK (runs as root to read both).
   lcm-bootstrap:
-    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.0.0}}
+    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["bootstrap","-config","deploy/container.yaml","-out","/certs","-services","gateway,auth,lcm,notification","-ttl","${CERT_TTL:-12h}"]
     volumes: ["./keys/lcm.kek:/app/deploy/kek.dev:ro","certs:/certs","./configs/lcm.yaml:/app/deploy/container.yaml:ro"]
@@ -167,7 +167,7 @@ services:
   # certs immediately (no expiry gap). Defaults: 12h certs refreshed every 6h;
   # integrity test overrides CERT_TTL=5m RENEW_INTERVAL=210.
   renewer:
-    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.0.0}}
+    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     entrypoint: ["sh","-c"]
@@ -179,7 +179,7 @@ services:
   # directly into the gateway DB. Idempotent per row; runs on every up so the
   # allow-list is never "lost" after a DB reset. Replaces apply-allow.sh.
   gateway-bootstrap:
-    image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.0.0}}
+    image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.1.0}}
     command: ["bootstrap","-config","deploy/container.yaml",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/auth=/api/v1,/authorize,/.well-known,/console;auth",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/lcm=/api/lcm;lcm",
@@ -202,7 +202,7 @@ services:
   # invitation (idempotent: reuses a pending invite, skips if already accepted).
   # The accept URL is printed to this container's logs and emailed to mailpit.
   auth-bootstrap:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["bootstrap","-config","deploy/container.yaml","-operator-email","${OPERATOR_EMAIL:-admin@example.org}"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -214,7 +214,7 @@ services:
       lcm-bootstrap: { condition: service_completed_successfully }
 
   lcm:
-    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.0.0}}
+    image: ${LCM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-lcm:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
     # SSL_CERT_FILE points Go's system trust pool at the base OS roots plus the
@@ -236,7 +236,7 @@ services:
       pebble-certs: { condition: service_completed_successfully }
 
   auth:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
     # `ldap` is the isolated network of the optional openldap service (profile
@@ -260,7 +260,7 @@ services:
   # Mint the gateway's single-use join token (it enrolls direct to lcm's keyless
   # listener, since it cannot enroll through itself).
   gateway-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/gateway","-ttl","30m","-out","/tokens/gateway.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -272,12 +272,13 @@ services:
       auth-bootstrap: { condition: service_completed_successfully }
 
   gateway:
-    image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.0.0}}
+    image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     ports: ["${EDGE_BIND:-}${EDGE_BIND:+:}${EDGE_PORT:-8443}:8443"]
     command: ["-config","deploy/container.yaml"]
-    volumes: ["tokens:/tokens:ro","gateway-state:/state","edge-cert:/edge:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
+    # certs: the mesh trust bundle (ca.pem) that verifies lcm on first enrollment.
+    volumes: ["tokens:/tokens:ro","gateway-state:/state","certs:/certs:ro","edge-cert:/edge:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
     healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:9290/readyz"], interval: 5s, timeout: 3s, retries: 60, start_period: 10s }
     depends_on:
       edge-cert-init: { condition: service_completed_successfully }
@@ -293,7 +294,7 @@ services:
   # running auth) into the shared tokens volume. Demonstrates the multi-host
   # bootstrap: in production the gateway/console mints these per workload.
   notification-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/notification","-ttl","30m","-out","/tokens/notification.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -307,7 +308,7 @@ services:
   # notification enrolls over the network (no /certs mount): first SVID via the
   # public HTTP enroll route with its join token, then mTLS renewal direct to lcm.
   notification:
-    image: ${NOTIFICATION_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-notification:${TANGRA_VERSION:-4.0.0}}
+    image: ${NOTIFICATION_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-notification:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -323,7 +324,7 @@ services:
 
   # Mint warden's join token (workload; enrolls via the gateway edge like notification).
   warden-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/warden","-ttl","30m","-out","/tokens/warden.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -335,7 +336,7 @@ services:
       auth-bootstrap: { condition: service_completed_successfully }
 
   warden:
-    image: ${WARDEN_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-warden:${TANGRA_VERSION:-4.0.0}}
+    image: ${WARDEN_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-warden:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -352,7 +353,7 @@ services:
 
   # Mint the deployer's single-use join token (enrolls via the gateway edge).
   deployer-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/deployer","-ttl","30m","-out","/tokens/deployer.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -367,7 +368,7 @@ services:
   # public HTTP enroll route with its join token, then mTLS renewal to lcm.
   # It distributes lcm-issued certs to endpoints via pluggable providers.
   deployer:
-    image: ${DEPLOYER_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-deployer:${TANGRA_VERSION:-4.0.0}}
+    image: ${DEPLOYER_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-deployer:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -383,7 +384,7 @@ services:
 
   # Mint paperless's single-use join token (enrolls via the gateway edge).
   paperless-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/paperless","-ttl","30m","-out","/tokens/paperless.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -399,7 +400,7 @@ services:
   # stores document bytes in RustFS, extracts via Tika/Gotenberg, and publishes
   # processing events to the platform bus.
   paperless:
-    image: ${PAPERLESS_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-paperless:${TANGRA_VERSION:-4.0.0}}
+    image: ${PAPERLESS_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-paperless:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -419,7 +420,7 @@ services:
   # Mint inventory's single-use join token (the SERVER enrolls via the gateway edge
   # for its own mesh SVID; endpoint AGENTS enroll separately at the ingest edge).
   inventory-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/inventory","-ttl","30m","-out","/tokens/inventory.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -435,7 +436,7 @@ services:
   # AND a separate off-mesh INGEST EDGE (:9977) that authenticated endpoint agents
   # post snapshots to. The ingest port is published for agents outside the mesh.
   inventory:
-    image: ${INVENTORY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-inventory:${TANGRA_VERSION:-4.0.0}}
+    image: ${INVENTORY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-inventory:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -452,7 +453,7 @@ services:
 
   # Mint ipam's single-use join token (enrolls via the gateway edge for its mesh SVID).
   ipam-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/ipam","-ttl","30m","-out","/tokens/ipam.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -468,7 +469,7 @@ services:
   # scanning needs NET_RAW; SNMP/TCP/IPMI/KVM reach lab hosts), and references BMC/
   # SNMP secrets via warden. The KVM console proxy is mounted at /bmc/ (token-gated).
   ipam:
-    image: ${IPAM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-ipam:${TANGRA_VERSION:-4.0.0}}
+    image: ${IPAM_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-ipam:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     cap_add: ["NET_RAW"]
@@ -486,7 +487,7 @@ services:
 
   # Mint asset's single-use join token (enrolls via the gateway edge for its mesh SVID).
   asset-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/asset","-ttl","30m","-out","/tokens/asset.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -502,7 +503,7 @@ services:
   # insurance, DDB depreciation, lifecycle scheduler, inventory-sync against the
   # inventory module over SPIFFE mTLS). Enrolls over the network for its mesh SVID.
   asset:
-    image: ${ASSET_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-asset:${TANGRA_VERSION:-4.0.0}}
+    image: ${ASSET_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-asset:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -520,7 +521,7 @@ services:
 
   # Mint ticket's single-use join token (enrolls via the gateway edge for its mesh SVID).
   ticket-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/ticket","-ttl","30m","-out","/tokens/ticket.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -554,7 +555,7 @@ services:
   # posts raw RFC 822 messages to with the relay token. Attachments live in RustFS;
   # public replies and auto-acknowledgements go out through Mailpit.
   ticket:
-    image: ${TICKET_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-ticket:${TANGRA_VERSION:-4.0.0}}
+    image: ${TICKET_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-ticket:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
@@ -680,7 +681,7 @@ services:
 
   # Mint dns's single-use join token (enrolls via the gateway edge for its mesh SVID).
   dns-token:
-    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.0.0}}
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
     user: "0:0"
     command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns","-ttl","30m","-out","/tokens/dns.token"]
     volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
@@ -700,7 +701,7 @@ services:
   # or docker.enabled: false (see deploy/README.md in go-tangra-dns). DOCKER_GID is
   # the socket's group (up.sh exports it).
   dns:
-    image: ${DNS_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-dns:${TANGRA_VERSION:-4.0.0}}
+    image: ${DNS_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-dns:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     group_add: ["${DOCKER_GID:-999}"]
