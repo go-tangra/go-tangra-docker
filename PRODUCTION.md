@@ -152,7 +152,7 @@ Edit `.env`:
 COMPOSE_PROJECT_NAME=tangra        # prefixes containers/volumes; never change it later
 TANGRA_VERSION=4.1.0               # pin; the go-tangra services share it...
 GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.2.1     # ...except where a service's release
-AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.2.1          # differs (.env.example)
+AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.3.0          # differs (.env.example)
 NOTIFICATION_IMAGE=ghcr.io/go-tangra/go-tangra-notification:4.3.0
 WARDEN_IMAGE=ghcr.io/go-tangra/go-tangra-warden:4.2.0
 INVENTORY_IMAGE=ghcr.io/go-tangra/go-tangra-inventory:4.1.1
@@ -633,6 +633,23 @@ The overlay removes Pebble and lcm's `SSL_CERT_FILE=/pebble-ca/bundle.pem`
   return "unsupported provider".
 
 This is independent of the edge certificate (section 4.5).
+
+### 4.11a Security keys (WebAuthn)
+
+auth ≥ 4.3.0 lets users register security keys (YubiKey and other
+FIDO2/WebAuthn authenticators) as a second factor next to the authenticator
+app (Account → Second factors). No configuration is needed: the relying party
+is derived from `issuer` — the host name of `PUBLIC_HOST`
+(`portal.infra.verax.net`) and the origin including `PUBLIC_PORT`
+(`https://portal.infra.verax.net:8443`). Optional overrides live in the
+`webauthn:` block of `prod/configs/auth.yaml` (`rp_id`, `origins`,
+`display_name`, `user_verification: preferred|required`, `timeout_seconds`).
+
+Keys are **bound to that host name**: opening the console by IP address or
+another name refuses key registration and sign-in, and if `PUBLIC_HOST`
+ever changes, every user must register their keys again (the authenticator
+app and recovery codes keep working meanwhile). Administrators can view a
+user's second factors and reset them (Users → user → Second factors).
 
 ### 4.12 Trust domain
 
