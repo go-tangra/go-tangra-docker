@@ -150,12 +150,12 @@ Edit `.env`:
 
 ```sh
 COMPOSE_PROJECT_NAME=tangra        # prefixes containers/volumes; never change it later
-TANGRA_VERSION=4.1.0               # pin; the go-tangra services share it...
-GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.2.1     # ...except where a service's release
-AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.3.0          # differs (.env.example)
-NOTIFICATION_IMAGE=ghcr.io/go-tangra/go-tangra-notification:4.3.0
-WARDEN_IMAGE=ghcr.io/go-tangra/go-tangra-warden:4.3.3
-INVENTORY_IMAGE=ghcr.io/go-tangra/go-tangra-inventory:4.1.1
+TANGRA_VERSION=4.2.0               # pin; the go-tangra services share it...
+GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.3.0     # ...except where a service's release
+AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.4.0          # differs (.env.example)
+LCM_IMAGE=ghcr.io/go-tangra/go-tangra-lcm:4.3.0
+NOTIFICATION_IMAGE=ghcr.io/go-tangra/go-tangra-notification:4.4.0
+WARDEN_IMAGE=ghcr.io/go-tangra/go-tangra-warden:4.4.0
 OPERATOR_EMAIL=ops@example.com     # first operator (invite goes here)
 TZ=Europe/Sofia
 EDGE_PORT=443
@@ -624,13 +624,22 @@ The overlay removes Pebble and lcm's `SSL_CERT_FILE=/pebble-ca/bundle.pem`
 
 - ACME directory URL: `https://acme-staging-v02.api.letsencrypt.org/directory`
   for testing, then `https://acme-v02.api.letsencrypt.org/directory`.
-- DNS provider: in 4.0.0 only two providers have an implementation
-  (`internal/acme/dns.go`): **`freya-dns`** (the platform dns module writes the
-  `_acme-challenge` TXT record into PowerDNS - requires pdns-auth to be the
-  publicly delegated authoritative server for the zone, i.e. port 53 public)
-  and **`manual`** (a no-op: the TXT record must be published out of band).
-  Cloudflare, Route 53, Google Cloud, DigitalOcean, ... are listed in the UI but
-  return "unsupported provider".
+- DNS provider (lcm ≥ 4.3.0 offers only providers with an implementation):
+  - **Cloudflare**: API token with **Zone → DNS → Edit** on the zone; set the
+    Zone ID, or also grant **Zone → Zone → Read** so lcm can find the zone.
+    lcm creates the `_acme-challenge` TXT record, waits up to 2 minutes until
+    the zone's name servers serve it, and deletes it afterwards.
+  - **Tangra DNS** (`freya-dns`): the platform dns module writes the record
+    into PowerDNS - requires pdns-auth to be the publicly delegated
+    authoritative server for the zone, i.e. port 53 public.
+  - **Manual**: a no-op; the TXT record must be published out of band.
+
+  Provider secrets are sealed and shown as `__set__`. lcm before 4.3.0 listed
+  Cloudflare, Route 53, ... without an implementation (orders failed silently)
+  and kept provider tokens readable in the issuer settings: after upgrading,
+  **rotate any DNS provider token entered with an older lcm**. A failed order
+  is logged (`docker compose logs lcm | grep "acme issuance failed"`) with the
+  reason and audited.
 
 This is independent of the edge certificate (section 4.5).
 
@@ -907,7 +916,7 @@ docker compose run --rm auth-bootstrap reset-user -config deploy/container.yaml 
 ```sh
 # 1. back up (section 5) - migrations are forward-only
 # 2. bump the version
-sed -i 's/^TANGRA_VERSION=.*/TANGRA_VERSION=4.1.0/' .env   # and any *_IMAGE pins
+sed -i 's/^TANGRA_VERSION=.*/TANGRA_VERSION=4.2.0/' .env   # and any *_IMAGE pins
 docker compose pull
 docker compose up -d
 docker compose ps
@@ -923,6 +932,28 @@ Also re-read the release notes and diff the new `configs/` against
 new required keys must be added to `prod/configs` by hand
 (`prod-init.sh` does not touch existing configs without `FORCE=1`). Refresh
 `docker-compose.yaml` from the example after reviewing the diff.
+
+#### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
+
+Permissions become module-scoped (`warden:secrets:read`) and every module
+brings ready-made roles ("Warden viewer", "Tickets agent", ...). Upgrade auth
+first, then the gateway, then the modules; existing access keeps working
+through the old unscoped permissions until the cut-over:
+
+```sh
+docker compose exec auth authsvc permissions verify -config deploy/container.yaml -snapshot /tmp/perms.json
+docker compose exec auth authsvc permissions prune-legacy -config deploy/container.yaml -dry-run
+# only when the dry-run reports no finding:
+docker compose exec auth authsvc permissions prune-legacy -config deploy/container.yaml
+docker compose exec auth authsvc permissions verify -config deploy/container.yaml -compare /tmp/perms.json
+```
+
+A dry-run finding names a role that would lose a permission it held through an
+unscoped name in another module; grant it (or accept the loss) before pruning.
+Custom roles created through the API must name permissions
+`module:resource:action`. The auth log line `registration: built-in grant
+skipped ... role=member reason=role_missing` for the platform tenant is
+expected (that tenant has no `member` role).
 
 ### Rollback
 
