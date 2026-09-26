@@ -151,7 +151,7 @@ Edit `.env`:
 ```sh
 COMPOSE_PROJECT_NAME=tangra        # prefixes containers/volumes; never change it later
 TANGRA_VERSION=4.2.0               # pin; the go-tangra services share it...
-GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.3.0     # ...except where a service's release
+GATEWAY_IMAGE=ghcr.io/go-tangra/go-tangra-portal:4.3.1     # ...except where a service's release
 AUTH_IMAGE=ghcr.io/go-tangra/go-tangra-auth:4.4.0          # differs (.env.example)
 LCM_IMAGE=ghcr.io/go-tangra/go-tangra-lcm:4.3.1
 NOTIFICATION_IMAGE=ghcr.io/go-tangra/go-tangra-notification:4.4.0
