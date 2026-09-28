@@ -193,6 +193,10 @@ services:
       - "./prod/policies/gateway.yaml:/app/deploy/policy.yaml:ro"
       - "./prod/edge:/edge:ro"
       - *tangra-tls
+    # Ports come from docker-compose.yaml: EDGE_PORT (-> 8443) and
+    # CONSOLE_PORT (-> 8444, the KVM console origin https://PUBLIC_HOST:8444,
+    # same certificate in prod/edge). Open CONSOLE_PORT in the firewall for
+    # administrators (PRODUCTION.md, Firewall).
     # Workloads enroll at https://${PUBLIC_HOST}:8443 so the first-enroll dial
     # verifies the public certificate; the alias resolves that name to the
     # gateway inside the compose network.

@@ -34,7 +34,7 @@ Contents:
 ```
                       Internet / LAN
                             |
-          443 (-> 8443)     |        9957 (ticket inbound, MTA only)   53 (only if serving DNS)
+        443 (-> 8443), 8444 |        9957 (ticket inbound, MTA only)   53 (only if serving DNS)
      +----------------------+----------------+-------------------------+
      |                                       |                         |
 +----v-------------------------+   +---------v---------+   +-----------v-----------+
@@ -62,6 +62,13 @@ Contents:
   (`edge.cert_file`/`edge.key_file`; the framework refuses to generate a
   self-signed one when `env: production`, `transport/edge/cert.go`). The file is
   re-read every minute, so renewals need no restart.
+- **KVM console origin**: the gateway's second TLS listener (`console:`,
+  container port 8444, `https://<PUBLIC_HOST>:8444`) serves only ipam's BMC
+  consoles (`/bmc/`) so the BMC vendor's JavaScript never runs on the portal
+  origin. It reuses the edge certificate (a certificate is not port-specific),
+  answers 404 for every other path and forwards only ipam's console cookie.
+  ipam's `kvm.console_origin` names the same origin. Portal 4.4.0+ and
+  ipam 4.8.0+.
 - **Mesh**: lcm holds the one mesh root (sealed in its database with its
   key-encryption key). `lcm-bootstrap` mints the file SVIDs for `auth` (and the
   renewer keeps them fresh); every other workload generates its own key and
@@ -120,6 +127,7 @@ specific address) and, for source filtering, the `DOCKER-USER` chain.
 | Port | Expose publicly? | Variable |
 |---|---|---|
 | 443 -> gateway 8443 | **Yes** - browsers and API clients | `EDGE_PORT=443`, `EDGE_BIND` |
+| 8444 -> gateway 8444 (KVM consoles) | Only to administrators who use the BMC KVM console (Power / KVM tab). Without it the console frame fails to load | `CONSOLE_PORT=8444`, `CONSOLE_BIND` |
 | 80 -> http-redirect | **Yes** - plain-HTTP visitors get a `301` to `PUBLIC_ORIGIN` (path and query kept; the target never comes from the Host header), and Let's Encrypt HTTP-01 challenges are served from `prod/acme` | `HTTP_PORT=80`, `HTTP_BIND` |
 | 9957 ticket inbound mail edge | Only to your MTA's addresses, and only if you use ticket email intake | `TICKET_INBOUND_PORT`, `TICKET_INBOUND_BIND` |
 | 53 udp+tcp PowerDNS Authoritative | Only if pdns-auth serves public zones (and for Let's Encrypt DNS-01 via `freya-dns`) | `PDNS_AUTH_PORT=53`, `PDNS_AUTH_BIND=<public IP>` |
@@ -255,6 +263,9 @@ Changes it makes in `prod/configs/`:
   `edge.allowed_origins`, `auth.issuer`, each module's `gateway.issuer`, warden
   `share.public_origin`) -> `https://<PUBLIC_HOST>`; all must be identical, the
   token issuer is compared literally.
+- every `https://localhost:8444` (gateway `console.public_origin`, ipam
+  `kvm.console_origin`) -> `https://<PUBLIC_HOST>:<CONSOLE_PORT>` (default
+  8444; must differ from `PUBLIC_PORT`).
 - workload enrollment: `enroll_url: https://<PUBLIC_HOST>:8443/api/lcm/v1/enroll`
   and `insecure: false` (section 4.10). The gateway enrolls at lcm with
   `ca_file: /certs/ca.pem` instead of `insecure` (section 4.10).
@@ -387,6 +398,13 @@ to `PUBLIC_ORIGIN` plus the original path and query. `prod-init.sh` writes
 is not 443). Only `/.well-known/acme-challenge/` is served instead, from
 `prod/acme`, for certbot. For the very first certificate, start just this
 service (`docker compose up -d http-redirect`), run certbot, then start the rest.
+
+The same `prod/edge` files serve the gateway's KVM console listener on port
+8444 (re-read every minute). Browsers reach it as `https://<PUBLIC_HOST>:8444`,
+so no extra name is needed. For full cookie isolation you may instead give the
+console its own name (e.g. `kvm.example.com`: DNS, a certificate naming it in
+`prod/edge`, `console.public_origin` and ipam `kvm.console_origin` set to
+`https://kvm.example.com[:port]`).
 
 The edge speaks **TLS 1.3 only**. Behind a TLS-terminating load balancer add its
 address to `edge.trusted_proxies` (CIDRs allowed to set `X-Forwarded-For`) in
@@ -932,6 +950,30 @@ Also re-read the release notes and diff the new `configs/` against
 new required keys must be added to `prod/configs` by hand
 (`prod-init.sh` does not touch existing configs without `FORCE=1`). Refresh
 `docker-compose.yaml` from the example after reviewing the diff.
+
+#### KVM console origin (portal 4.4.0, ipam 4.8.0)
+
+The KVM console moves to its own origin on port 8444. On an existing
+installation (prod/configs is kept by `prod-init.sh`):
+
+```sh
+# .env: CONSOLE_PORT=8444 (and CONSOLE_BIND if you bind addresses)
+# prod/configs/gateway.yaml (after public_origin):
+#   console:
+#     enabled: true
+#     addr: 0.0.0.0:8444
+#     public_origin: https://<PUBLIC_HOST>:8444
+#     routes: { "/bmc/": ipam }
+# prod/configs/ipam.yaml:
+#   kvm: { ..., console_origin: https://<PUBLIC_HOST>:8444 }
+# refresh docker-compose.yaml from the example (gateway publishes CONSOLE_PORT)
+# firewall: allow 8444/tcp from the administrators' networks (DOCKER-USER chain)
+docker compose up -d gateway ipam
+```
+
+Never add the console origin to `edge.allowed_origins` (the gateway refuses to
+start). Older images refuse the new keys, so update the images and the
+configs together.
 
 #### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
 

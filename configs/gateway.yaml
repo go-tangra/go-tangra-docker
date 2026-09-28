@@ -27,6 +27,17 @@ edge:
   allowed_origins: ["https://localhost:8443", "https://127.0.0.1:8443"]
   rate_limit: { per_second: 200, burst: 400 }
 public_origin: https://localhost:8443
+# KVM console listener (portal feature 025): BMC consoles (ipam /bmc/) are
+# served on an origin of their own so vendor JavaScript never runs on the
+# portal origin. Reuses edge.cert_file/key_file; the origin is added to the
+# shell's frame-src. Must match ipam's kvm.console_origin; never list it in
+# edge.allowed_origins. prod-init.sh rewrites the origin to
+# https://<PUBLIC_HOST>:<CONSOLE_PORT>.
+console:
+  enabled: true
+  addr: 0.0.0.0:8444
+  public_origin: https://localhost:8444
+  routes: { "/bmc/": ipam }
 db:
   dsn: postgres://gateway_app:dev@timescaledb:5432/gateway?sslmode=disable
   migrate_dsn: postgres://postgres:dev@timescaledb:5432/gateway?sslmode=disable

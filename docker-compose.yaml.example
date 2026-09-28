@@ -275,7 +275,12 @@ services:
     image: ${GATEWAY_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-portal:${TANGRA_VERSION:-4.1.0}}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
-    ports: ["${EDGE_BIND:-}${EDGE_BIND:+:}${EDGE_PORT:-8443}:8443"]
+    # 8443: the portal edge. 8444: the KVM console listener (portal feature
+    # 025): BMC consoles on an origin of their own (configs/gateway.yaml
+    # console:, ipam kvm.console_origin), same certificate as the edge.
+    ports:
+      - "${EDGE_BIND:-}${EDGE_BIND:+:}${EDGE_PORT:-8443}:8443"
+      - "${CONSOLE_BIND:-}${CONSOLE_BIND:+:}${CONSOLE_PORT:-8444}:8444"
     command: ["-config","deploy/container.yaml"]
     # certs: the mesh trust bundle (ca.pem) that verifies lcm on first enrollment.
     volumes: ["tokens:/tokens:ro","gateway-state:/state","certs:/certs:ro","edge-cert:/edge:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]

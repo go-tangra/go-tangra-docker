@@ -33,6 +33,8 @@ warden: { service: warden }
 scan: { max_hosts: 1024, concurrency: 50, timeout_ms: 1000, workers: 3, max_retries: 3 }
 allocation: { skip_first: 0, skip_last: 0, reserved_ranges: [] }
 ipmi: { timeout_seconds: 10 }
-kvm: { token_ttl_seconds: 300, session_seconds: 3600 }
+# console_origin: the gateway console listener (portal feature 025); console
+# URLs are absolute on it and console WebSockets must come from it.
+kvm: { token_ttl_seconds: 300, session_seconds: 3600, console_origin: https://localhost:8444 }
 events: { enabled: true }
 gateway: { service: gateway, issuer: https://localhost:8443 }

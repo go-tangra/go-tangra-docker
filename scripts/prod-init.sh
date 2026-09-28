@@ -34,6 +34,8 @@
 # Inputs (environment, else .env):
 #   PUBLIC_HOST     public DNS name of the edge (required)
 #   PUBLIC_PORT     public port browsers use (default 443; the origin then has no port)
+#   CONSOLE_PORT    public port of the KVM console origin (default 8444; the
+#                   gateway console listener, https://PUBLIC_HOST:CONSOLE_PORT)
 #   TRUST_DOMAIN    SPIFFE trust domain of the mesh, a domain you control, e.g.
 #                   infra.example.com (required; not example.org)
 #   SMTP_HOST       mail relay host (required)
@@ -51,7 +53,7 @@ die() { echo "prod-init: $*" >&2; exit 1; }
 # not sourced, so its contents are never executed: KEY=VALUE lines only, with an
 # optional `export `, surrounding single or double quotes stripped, and
 # comments/blank lines ignored.
-INPUTS="PUBLIC_HOST PUBLIC_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
+INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
 if [ -f .env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
@@ -71,6 +73,7 @@ fi
 : "${SMTP_HOST:?set SMTP_HOST (the real mail relay) in .env or the environment}"
 : "${MAIL_FROM:?set MAIL_FROM (sender address, e.g. tangra@example.com) in .env or the environment}"
 PUBLIC_PORT="${PUBLIC_PORT:-443}"
+CONSOLE_PORT="${CONSOLE_PORT:-8444}"
 SMTP_PORT="${SMTP_PORT:-587}"
 SMTP_USERNAME="${SMTP_USERNAME:-}"
 SMTP_PASSWORD="${SMTP_PASSWORD:-}"
@@ -87,6 +90,9 @@ esac
 MAIL_DOMAIN="${BASH_REMATCH[1]}"
 if [ -n "$SMTP_USERNAME" ] && [ -z "$SMTP_PASSWORD" ]; then die "SMTP_PASSWORD is required with SMTP_USERNAME"; fi
 if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="https://$PUBLIC_HOST:$PUBLIC_PORT"; fi
+[[ "$CONSOLE_PORT" =~ ^[0-9]{1,5}$ ]] || die "CONSOLE_PORT must be a port number"
+[ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
+if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
 
 SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns"
 KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns"
@@ -158,6 +164,7 @@ else
       -e "s#password: dev, allow_plaintext: true \}#password: ${VALKEY_PASSWORD}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
       -e "s#, \"https://127.0.0.1:8443\"##" \
       -e "s#https://localhost:8443#${ORIGIN}#g" \
+      -e "s#https://localhost:8444#${CONSOLE_ORIGIN}#g" \
       -e "s#use_ssl: false#use_ssl: true#" \
       -e "s#access_key: paperless#access_key: ${RUSTFS_ACCESS_KEY}#" \
       -e "s#secret_key: paperless-dev-secret#secret_key: ${RUSTFS_SECRET_KEY}#" \
@@ -223,7 +230,7 @@ fi
 chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets/*
 
 # --- leftovers check ----------------------------------------------------------
-if grep -nE 'localhost:8443|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|warden:9743' prod/configs/*.yaml; then
+if grep -nE 'localhost:8443|localhost:8444|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|warden:9743' prod/configs/*.yaml; then
   die "development values left in prod/configs (see above)"
 fi
 
