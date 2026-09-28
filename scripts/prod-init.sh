@@ -94,7 +94,8 @@ if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="
 [ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
 if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
 
-SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns"
+SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler"
+# scheduler stores no secrets: no KEK.
 KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns"
 
 umask 077
@@ -115,6 +116,15 @@ if [ ! -s prod/credentials.env ]; then
   } > prod/credentials.env
   echo "generated prod/credentials.env"
 fi
+# Services added after the first run (e.g. scheduler) get their database
+# password appended; existing passwords are never replaced.
+for s in $SERVICES; do
+  k="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  if ! grep -q "^${k}=" prod/credentials.env; then
+    echo "${k}=$(rand)" >> prod/credentials.env
+    echo "added ${k} to prod/credentials.env (create the role: PRODUCTION.md, Upgrades)"
+  fi
+done
 # shellcheck disable=SC1091
 . prod/credentials.env
 
@@ -148,49 +158,64 @@ replace_line() { # <file> <awk regex> <replacement line(s)>
   mv "$1.tmp" "$1"
 }
 
+# Generic production rewrite of configs/<svc>.yaml into prod/configs/<svc>.yaml
+# (TLS DSN, Valkey TLS, public origins, trust domain, verified enrollment).
+prod_config() {
+  local s="$1" f="prod/configs/$1.yaml" v
+  cp "configs/$s.yaml" "$f"
+  # (discovery: warden's gRPC listener is 9843 - configs/warden.yaml
+  # server.grpc_addr - while configs/{ipam,ticket,dns}.yaml name 9743.)
+  v="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  TLSQ='sslmode=verify-full\&sslrootcert=/tls/ca.crt'
+  sed -i -E \
+    -e "s#postgres://${s}_app:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://${s}_app:${!v}@timescaledb:5432/${s}?${TLSQ}#" \
+    -e "s#postgres://postgres:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/${s}?${TLSQ}#" \
+    -e "s#password: dev, allow_plaintext: true \}#password: ${VALKEY_PASSWORD}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
+    -e "s#, \"https://127.0.0.1:8443\"##" \
+    -e "s#https://localhost:8443#${ORIGIN}#g" \
+    -e "s#https://localhost:8444#${CONSOLE_ORIGIN}#g" \
+    -e "s#use_ssl: false#use_ssl: true#" \
+    -e "s#access_key: paperless#access_key: ${RUSTFS_ACCESS_KEY}#" \
+    -e "s#secret_key: paperless-dev-secret#secret_key: ${RUSTFS_SECRET_KEY}#" \
+    -e 's#"warden:9743"#"warden:9843"#' \
+    -e "s#^trust_domain: example\.org\$#trust_domain: ${TRUST_DOMAIN}#" \
+    -e "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" \
+    "$f"
+  case "$s" in
+    ticket|dns)
+      # file: secret references are refused in production mode and warden
+      # references cannot be resolved unattended yet (PRODUCTION.md,
+      # "Known limitations"): these two keep a non-production env label.
+      replace_line "$f" '^env: dev$' 'env: dev  # production mode refuses file: secret refs - see PRODUCTION.md "Known limitations"' ;;
+    *) replace_line "$f" '^env: dev$' 'env: production' ;;
+  esac
+  if [ "$s" = gateway ]; then
+    # The gateway enrolls directly at lcm's keyless listener; verify lcm's
+    # SVID with the mesh bundle (portal 4.2.0+ refuses insecure in production).
+    replace_line "$f" '^  insecure: true$' '  ca_file: /certs/ca.pem'
+  elif grep -q '^  enroll_url: https://gateway:8443/' "$f"; then
+    # Workloads enroll through the public edge name (a network alias of the
+    # gateway) so the first-enroll TLS dial verifies the public certificate.
+    sed -i -E -e "s#^  enroll_url: https://gateway:8443/#  enroll_url: https://${PUBLIC_HOST}:8443/#" \
+              -e "s#^  insecure: true\$#  insecure: false#" "$f"
+  fi
+}
+# Services whose production config needs more than prod_config (below).
+SPECIAL_CONFIGS="auth warden notification lcm inventory ticket dns"
+
 if [ -d prod/configs ] && [ -n "$(ls -A prod/configs)" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "prod/configs exists; keeping it (FORCE=1 regenerates it from configs/ and discards manual edits)"
-else
+  # A service added since the first run (e.g. scheduler) gets its config; the
+  # existing ones stay untouched (new keys there are added by hand, see
+  # PRODUCTION.md "Upgrades").
   for s in $SERVICES; do
-    f="prod/configs/$s.yaml"
-    cp "configs/$s.yaml" "$f"
-    # (discovery: warden's gRPC listener is 9843 - configs/warden.yaml
-    # server.grpc_addr - while configs/{ipam,ticket,dns}.yaml name 9743.)
-    v="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
-    TLSQ='sslmode=verify-full\&sslrootcert=/tls/ca.crt'
-    sed -i -E \
-      -e "s#postgres://${s}_app:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://${s}_app:${!v}@timescaledb:5432/${s}?${TLSQ}#" \
-      -e "s#postgres://postgres:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/${s}?${TLSQ}#" \
-      -e "s#password: dev, allow_plaintext: true \}#password: ${VALKEY_PASSWORD}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
-      -e "s#, \"https://127.0.0.1:8443\"##" \
-      -e "s#https://localhost:8443#${ORIGIN}#g" \
-      -e "s#https://localhost:8444#${CONSOLE_ORIGIN}#g" \
-      -e "s#use_ssl: false#use_ssl: true#" \
-      -e "s#access_key: paperless#access_key: ${RUSTFS_ACCESS_KEY}#" \
-      -e "s#secret_key: paperless-dev-secret#secret_key: ${RUSTFS_SECRET_KEY}#" \
-      -e 's#"warden:9743"#"warden:9843"#' \
-      -e "s#^trust_domain: example\.org\$#trust_domain: ${TRUST_DOMAIN}#" \
-      -e "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" \
-      "$f"
-    case "$s" in
-      ticket|dns)
-        # file: secret references are refused in production mode and warden
-        # references cannot be resolved unattended yet (PRODUCTION.md,
-        # "Known limitations"): these two keep a non-production env label.
-        replace_line "$f" '^env: dev$' 'env: dev  # production mode refuses file: secret refs - see PRODUCTION.md "Known limitations"' ;;
-      *) replace_line "$f" '^env: dev$' 'env: production' ;;
-    esac
-    if [ "$s" = gateway ]; then
-      # The gateway enrolls directly at lcm's keyless listener; verify lcm's
-      # SVID with the mesh bundle (portal 4.2.0+ refuses insecure in production).
-      replace_line "$f" '^  insecure: true$' '  ca_file: /certs/ca.pem'
-    elif grep -q '^  enroll_url: https://gateway:8443/' "$f"; then
-      # Workloads enroll through the public edge name (a network alias of the
-      # gateway) so the first-enroll TLS dial verifies the public certificate.
-      sed -i -E -e "s#^  enroll_url: https://gateway:8443/#  enroll_url: https://${PUBLIC_HOST}:8443/#" \
-                -e "s#^  insecure: true\$#  insecure: false#" "$f"
-    fi
+    [ -e "prod/configs/$s.yaml" ] && continue
+    [[ " $SPECIAL_CONFIGS " == *" $s "* ]] && die "prod/configs/$s.yaml is missing; regenerate with FORCE=1 (discards manual edits) or restore it"
+    prod_config "$s"
+    echo "wrote prod/configs/$s.yaml (new service)"
   done
+else
+  for s in $SERVICES; do prod_config "$s"; done
   f=prod/configs/auth.yaml
   replace_line "$f" '^openfga:' "openfga: { url: https://openfga:8080, preshared_key: ${OPENFGA_PRESHARED_KEY}, allow_plaintext: false }"
   replace_line "$f" '^    allow_cidrs: \["172\.31\.250\.2/32"\]$' '    allow_cidrs: []'

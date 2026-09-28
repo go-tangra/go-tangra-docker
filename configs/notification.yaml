@@ -21,6 +21,7 @@ discovery:
   static:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
+    scheduler: ["scheduler:9905"]
 limits: { max_request_bytes: 16842752 }
 limits_notification: { backup_max_bytes: 16777216, send_per_tenant_per_minute: 600, send_per_sender_per_minute: 60, streams_per_user: 5, streams_per_tenant: 2000, replay_window_seconds: 300 }
 db:
@@ -40,3 +41,7 @@ platform_email:
   from: tangra@example.org
 scheduler: { interval_seconds: 15, lease_seconds: 60 }
 gateway: { service: gateway, issuer: https://localhost:8443 }
+# Feature 026: register task types with the scheduler (svc/scheduler calls
+# scheduler.v1.TaskExecutor/ExecuteTask; allowed by the module's policy).
+# Needs the feature-026 image: older images refuse these keys (strict config).
+task_scheduler: { enabled: true, service: scheduler }

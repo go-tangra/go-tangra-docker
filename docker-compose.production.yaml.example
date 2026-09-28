@@ -59,7 +59,8 @@ services:
       "--user", "ipam", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "asset", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "ticket", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+      "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -228,6 +229,7 @@ services:
   asset-token: { environment: *tangra-env, volumes: *auth-volumes }
   ticket-token: { environment: *tangra-env, volumes: *auth-volumes }
   dns-token: { environment: *tangra-env, volumes: *auth-volumes }
+  scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
 
   # ---------------------------------------------------------------- modules
   notification:
@@ -323,6 +325,14 @@ services:
       - "dns-secrets:/secrets:ro"
       - "pdns-auth-conf:/pdns-auth-conf"
       - "pdns-recursor-conf:/pdns-recursor-conf"
+      - *tangra-tls
+  # No KEK and no secret files: only its config, policy and the internal CA.
+  scheduler:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/scheduler.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/scheduler.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
 
 volumes:

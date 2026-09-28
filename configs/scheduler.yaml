@@ -1,0 +1,38 @@
+service_name: scheduler
+trust_domain: example.org
+env: dev
+# scheduler obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/scheduler.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9905, http_addr: 0.0.0.0:9906 }
+admin: { addr: 127.0.0.1:9800 }
+# Executing modules are dialled by their service name (the module part of a
+# task type "<module>:<action>"); every module that registers task types needs
+# an entry here, and a scheduler-execute rule in its own policy.
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+    ipam: ["ipam:9985"]
+    notification: ["notification:9943"]
+limits: { max_request_bytes: 33554432 }
+limits_scheduler: { max_payload_bytes: 65536, max_result_bytes: 65536, max_timeout_seconds: 3600, min_interval_seconds: 60, max_page_size: 100, max_backup_bytes: 33554432, max_tasks_per_tenant: 1000 }
+db:
+  dsn: postgres://scheduler_app:dev@timescaledb:5432/scheduler?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/scheduler?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: scheduler, password: dev, allow_plaintext: true }
+engine: { tick_ms: 1000, workers: 16, batch: 100, misfire_grace_seconds: 60, lease_grace_seconds: 30, retention_days: 90, retention_interval_minutes: 60 }
+platform_tenant_id: "00000000-0000-0000-0000-000000000001"
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }

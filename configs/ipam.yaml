@@ -21,6 +21,7 @@ discovery:
     lcm: ["lcm:9945"]
     warden: ["warden:9843"]
     inventory: ["inventory:9975"]
+    scheduler: ["scheduler:9905"]
 limits: { max_request_bytes: 16842752 }
 limits_ipam: { max_request_bytes: 16842752, max_backup_bytes: 33554432 }
 db:
@@ -38,3 +39,7 @@ ipmi: { timeout_seconds: 10 }
 kvm: { token_ttl_seconds: 300, session_seconds: 3600, console_origin: https://localhost:8444 }
 events: { enabled: true }
 gateway: { service: gateway, issuer: https://localhost:8443 }
+# Feature 026: register task types with the scheduler (svc/scheduler calls
+# scheduler.v1.TaskExecutor/ExecuteTask; allowed by the module's policy).
+# Needs the feature-026 image: older images refuse these keys (strict config).
+task_scheduler: { enabled: true, service: scheduler }

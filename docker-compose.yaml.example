@@ -22,7 +22,7 @@ services:
   valkey:
     image: ${VALKEY_IMAGE:-valkey/valkey:8}
     environment: { TZ: "${TZ:-UTC}" }
-    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "scheduler", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
     healthcheck: { test: ["CMD","valkey-cli","-a","${VALKEY_PASSWORD:-dev}","ping"], interval: 3s, timeout: 3s, retries: 40 }
   openfga-migrate:
     image: ${OPENFGA_IMAGE:-openfga/openfga:v1.20.0}
@@ -191,7 +191,8 @@ services:
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/ipam=/api/ipam;ipam",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/asset=/api/asset;asset",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/ticket=/api/ticket;ticket",
-      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns=/api/dns;dns"]
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns=/api/dns;dns",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/scheduler=/api/scheduler;scheduler"]
     volumes: ["certs:/certs:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -726,6 +727,40 @@ services:
       pdns-recursor: { condition: service_healthy }
       ipam: { condition: service_healthy }
 
+  # Mint scheduler's single-use join token (enrolls via the gateway edge for its mesh SVID).
+  scheduler-token:
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
+    user: "0:0"
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/scheduler","-ttl","30m","-out","/tokens/scheduler.token"]
+    volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
+    restart: "no"
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      openfga: { condition: service_started }
+      auth-bootstrap: { condition: service_completed_successfully }
+
+  # scheduler (feature 026): central task scheduler. Modules (ipam, lcm,
+  # notification) register their task types over the mesh; the scheduler calls
+  # their scheduler.v1.TaskExecutor/ExecuteTask when a task is due. Browser API via
+  # the gateway (/api/scheduler), UI remote at /m/scheduler/. Stores no secrets
+  # (no KEK) and publishes no host port. Its own release line: SCHEDULER_IMAGE
+  # (default 4.0.0) instead of TANGRA_VERSION.
+  scheduler:
+    image: ${SCHEDULER_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-scheduler:4.0.0}
+    environment: { TZ: "${TZ:-UTC}" }
+    user: "0:0"
+    command: ["-config","deploy/container.yaml"]
+    volumes: ["tokens:/tokens:ro","scheduler-state:/state","./configs/scheduler.yaml:/app/deploy/container.yaml:ro"]
+    healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:9800/readyz"], interval: 5s, timeout: 3s, retries: 60, start_period: 10s }
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+      lcm: { condition: service_healthy }
+      lcm-bootstrap: { condition: service_completed_successfully }
+      scheduler-token: { condition: service_completed_successfully }
+
 networks:
   # Fixed small subnet so configs/auth.yaml can allow-list exactly the openldap
   # address (directory.targets.allow_cidrs); created even without the profile.
@@ -751,6 +786,7 @@ volumes:
   ticket-state:
   ticket-secrets:
   dns-state:
+  scheduler-state:
   dns-secrets:
   pdns-auth-data:
   pdns-auth-conf:

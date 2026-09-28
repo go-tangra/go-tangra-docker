@@ -22,7 +22,9 @@ image `go-tangra-portal`), `notification`, `warden` (secrets, backed by Vault),
 `inventory` (endpoint agents report hardware/software/network snapshots; ingest
 edge on `:9977`), `ipam` (subnets/IPs/devices/VLANs + active discovery and
 IPMI/KVM), `asset` (IT asset management with inventory sync), `ticket` (helpdesk
-with an inbound mail edge on `:9957`) and `dns` (PowerDNS management plane).
+with an inbound mail edge on `:9957`), `dns` (PowerDNS management plane) and
+`scheduler` (central task scheduler: ipam, lcm and notification register their
+task types; periodic, delayed and wait-for-result tasks, retries, history).
 Each service's own repository (`go-tangra-<name>`, see `deploy/README.md` there)
 documents its configuration in depth.
 
@@ -97,7 +99,7 @@ TANGRA_VERSION=4.0.1 ./up.sh      # or set it in .env
 | `auth` (+ `auth-bootstrap`, `*-token` init jobs) | `go-tangra-auth` | `AUTH_IMAGE` |
 | `gateway` (+ `gateway-bootstrap`) | `go-tangra-portal` | `GATEWAY_IMAGE` |
 | `lcm` (+ `lcm-bootstrap`, `renewer`) | `go-tangra-lcm` | `LCM_IMAGE` |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns` | `go-tangra-<name>` | `<NAME>_IMAGE` |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler` | `go-tangra-<name>` | `<NAME>_IMAGE` |
 
 Third-party images are variables too (`TIMESCALEDB_IMAGE`, `VALKEY_IMAGE`, …;
 see `.env.example`). Each service image carries its own `deploy/` directory
@@ -293,6 +295,42 @@ curl -sk https://localhost:9957/inbound/mail \
 # -> 202 {"outcome":"created","ticket_id":"…"}
 ```
 
+
+## Scheduler (feature 026)
+
+`scheduler` (gRPC 9905, HTTP 9906, admin 127.0.0.1:9800; no host port) enrolls
+like the other modules (`scheduler-token`), is reached through the gateway under
+`/api/scheduler` (allow-list entry in `gateway-bootstrap`) and shows its UI at
+`/m/scheduler/`. It has its own release line: `SCHEDULER_IMAGE` (default
+`go-tangra-scheduler:4.0.0`), not `TANGRA_VERSION`. It stores no secrets (no KEK).
+
+ipam, lcm and notification set `task_scheduler: { enabled: true, service:
+scheduler }` and list `scheduler` in `discovery.static`; they register their task
+types over the mesh and the scheduler dials them by name (its own
+`discovery.static`) to run a due task (`scheduler.v1.TaskExecutor/ExecuteTask`,
+rule `scheduler-execute` in each module's policy). lcm also dials `notification`
+(`notification: { service: notification }`) for the expiring-certificates digest.
+
+**These consumer config keys need the feature-026 images of ipam, lcm and
+notification**: older images refuse unknown config keys (strict config) and stop
+at start-up. Roll out in this order: the `scheduler` database (below) and the
+scheduler itself, then `notification`, `lcm`, `ipam` (each with its feature-026
+image pinned in `.env` together with its config).
+
+An existing stack (TimescaleDB volume created before this change) does not re-run
+`init-db.sql`; create the database once:
+
+```sh
+docker compose exec -T timescaledb psql -U postgres <<'SQL'
+CREATE DATABASE scheduler;
+\c scheduler
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE scheduler_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE scheduler TO scheduler_app;
+SQL
+docker compose up -d valkey gateway-bootstrap scheduler-token scheduler
+docker compose up -d notification lcm ipam      # with the feature-026 images
+```
 
 ## DNS (dev)
 

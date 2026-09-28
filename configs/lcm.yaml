@@ -13,6 +13,8 @@ discovery:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
     dns: ["dns:9965"]
+    notification: ["notification:9943"]
+    scheduler: ["scheduler:9905"]
 limits: { max_request_bytes: 16842752 }
 limits_lcm: { backup_max_bytes: 16777216, csr_max_bytes: 16384, webhook_max_bytes: 65536, streams_per_user: 5, streams_per_tenant: 2000, replay_window_seconds: 300 }
 db:
@@ -29,3 +31,9 @@ dns: { service: dns }
 # Keyless (server-auth-only) enroll listener so services with no SVID yet
 # (the gateway) can enroll directly with a join token.
 enroll_listener: 0.0.0.0:9947
+# Feature 026: register task types with the scheduler (svc/scheduler calls
+# scheduler.v1.TaskExecutor/ExecuteTask; allowed by the module's policy).
+# Needs the feature-026 image: older images refuse these keys (strict config).
+task_scheduler: { enabled: true, service: scheduler }
+# The expiring-certificates digest is sent through notification (feature 026).
+notification: { service: notification }

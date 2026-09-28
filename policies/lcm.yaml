@@ -1,9 +1,12 @@
-# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-lcm:4.1.0 (the policy built
-# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
-# place of example.org; the production overlay mounts that over the image's copy.
+# Copy of deploy/policy.yaml from the feature-026 go-tangra-lcm image (the policy
+# built into the image; adds `scheduler-execute`). prod-init.sh writes it to
+# prod/policies/ with TRUST_DOMAIN in place of example.org; the production
+# overlay mounts that over the image's copy.
 # Freya service-to-service policy for lcm: the gateway forwards browser traffic
 # and probes health; auth verifies SVIDs/trust bundles; notification publishes
-# lifecycle events. (contracts/manifest.md, deploy/policy.yaml)
+# lifecycle events. (contracts/manifest.md, deploy/policy.yaml) The scheduler
+# (feature 026) runs lcm's task types; lcm registers them with the scheduler
+# and sends the expiring-certificates digest through notification as a client.
 version: lcm-dev-1
 rules:
   - id: gateway-forwards
@@ -30,4 +33,11 @@ rules:
     from: ["spiffe://example.org/svc/deployer"]
     to: ["lcm"]
     operations: ["/lcm.v1.Certificates/Download"]
+    effect: allow
+  - id: scheduler-execute
+    # The scheduler (feature 026) runs lcm's registered task types; the
+    # executor server re-checks that the verified peer is the scheduler.
+    from: ["spiffe://example.org/svc/scheduler"]
+    to: ["lcm"]
+    operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
     effect: allow

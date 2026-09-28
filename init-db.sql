@@ -86,3 +86,9 @@ CREATE EXTENSION IF NOT EXISTS citext;
 CREATE ROLE dns_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
 GRANT CONNECT ON DATABASE dns TO dns_app;
 \c postgres
+CREATE DATABASE scheduler;
+\c scheduler
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE scheduler_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE scheduler TO scheduler_app;
+\c postgres
