@@ -747,7 +747,7 @@ services:
   # (no KEK) and publishes no host port. Its own release line: SCHEDULER_IMAGE
   # (default 4.0.0) instead of TANGRA_VERSION.
   scheduler:
-    image: ${SCHEDULER_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-scheduler:4.0.0}
+    image: ${SCHEDULER_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-scheduler:4.0.1}
     environment: { TZ: "${TZ:-UTC}" }
     user: "0:0"
     command: ["-config","deploy/container.yaml"]
