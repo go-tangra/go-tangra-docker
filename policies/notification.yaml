@@ -1,13 +1,14 @@
-# Copy of deploy/policy.yaml from the feature-027 go-tangra-notification image (the policy
-# built into the image; adds `scheduler-execute` (feature 026) and svc/signing in
-# `modules-send` (feature 027)). prod-init.sh writes it to
+# Copy of deploy/policy.yaml from the feature-028 go-tangra-notification image (the policy
+# built into the image; adds `scheduler-execute` (feature 026), svc/signing
+# (feature 027) and svc/hr (feature 028) in `modules-send`). prod-init.sh writes it to
 # prod/policies/ with TRUST_DOMAIN in place of example.org; the production
 # overlay mounts that over the image's copy.
 # Freya service-to-service policy for notification: the gateway forwards
 # browser traffic and probes health; other modules call notification.v1
 # directly (contracts/manifest.md). lcm sends the expiring-certificates digest
 # (feature 026; Notifier/Send with template keys lcm.* only, enforced by
-# notification); signing sends its signing.* system templates (feature 027).
+# notification); signing sends its signing.* system templates (feature 027);
+# hr sends its hr.* system templates (feature 028).
 version: notification-dev-1
 rules:
   - id: gateway-forwards
@@ -16,7 +17,7 @@ rules:
     operations: ["*"]
     effect: allow
   - id: modules-send
-    from: ["spiffe://example.org/svc/warden", "spiffe://example.org/svc/auth", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/signing"]
+    from: ["spiffe://example.org/svc/warden", "spiffe://example.org/svc/auth", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/signing", "spiffe://example.org/svc/hr"]
     to: ["notification"]
     operations: ["/notification.v1.Notifier/Send", "/notification.v1.Notifier/SendTest", "/notification.v1.Events/Publish"]
     effect: allow

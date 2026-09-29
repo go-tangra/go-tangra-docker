@@ -23,11 +23,13 @@ image `go-tangra-portal`), `notification`, `warden` (secrets, backed by Vault),
 edge on `:9977`), `ipam` (subnets/IPs/devices/VLANs + active discovery and
 IPMI/KVM), `asset` (IT asset management with inventory sync), `ticket` (helpdesk
 with an inbound mail edge on `:9957`), `dns` (PowerDNS management plane),
-`scheduler` (central task scheduler: ipam, lcm, notification and signing register
-their task types; periodic, delayed and wait-for-result tasks, retries, history)
-and `signing` (PDF templates and submissions signed with personal PIN-protected
-certificates or qualified cards via B-Trust BISS; per-tenant signing CA,
-verification, audit trails).
+`scheduler` (central task scheduler: ipam, lcm, notification, signing and hr
+register their task types; periodic, delayed and wait-for-result tasks, retries,
+history), `signing` (PDF templates and submissions signed with personal
+PIN-protected certificates or qualified cards via B-Trust BISS; per-tenant
+signing CA, verification, audit trails) and `hr` (leave management: leave types,
+allowances and carry-over, requests with manager approval, departments,
+holidays, team calendar; leave documents signed through `signing`).
 Each service's own repository (`go-tangra-<name>`, see `deploy/README.md` there)
 documents its configuration in depth.
 
@@ -102,7 +104,7 @@ TANGRA_VERSION=4.0.1 ./up.sh      # or set it in .env
 | `auth` (+ `auth-bootstrap`, `*-token` init jobs) | `go-tangra-auth` | `AUTH_IMAGE` |
 | `gateway` (+ `gateway-bootstrap`) | `go-tangra-portal` | `GATEWAY_IMAGE` |
 | `lcm` (+ `lcm-bootstrap`, `renewer`) | `go-tangra-lcm` | `LCM_IMAGE` |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing` | `go-tangra-<name>` | `<NAME>_IMAGE` |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing`, `hr` | `go-tangra-<name>` | `<NAME>_IMAGE` |
 
 Third-party images are variables too (`TIMESCALEDB_IMAGE`, `VALKEY_IMAGE`, …;
 see `.env.example`). Each service image carries its own `deploy/` directory
@@ -379,6 +381,49 @@ GRANT CONNECT ON DATABASE signing TO signing_app;
 SQL
 docker compose up -d auth notification warden scheduler   # feature-027 images
 docker compose up -d valkey gateway-bootstrap signing-token signing
+```
+
+## HR (feature 028)
+
+`hr` (gRPC 9925, HTTP 9926, admin 127.0.0.1:9870; no host port) enrolls like
+the other modules (`hr-token`), is reached through the gateway under `/api/hr`
+(allow-list entry in `gateway-bootstrap`) and shows its UI at `/m/hr/`. It has
+its own release line: `HR_IMAGE` (default `go-tangra-hr:4.0.0`), not
+`TANGRA_VERSION`. It seals nothing and stores no files (no KEK, no RustFS). Its
+database needs the `btree_gist` extension (an exclusion constraint against
+overlapping leave) besides `timescaledb`.
+
+Its outbound calls need rules in the callees' policies (`policies/`): auth
+`hr-directory` (`Profiles/Lookup`, `ListMembers`, `Contacts`), notification
+`modules-send` (the `hr.*` system templates), scheduler `modules-register`
+(plus `discovery.static.hr` in `configs/scheduler.yaml`) and signing
+`hr-module-api` (the module API `signing.v1.ModuleSubmissions`, which starts and
+tracks leave documents). **These need the feature-028 releases of signing,
+auth, notification and scheduler.** Roll out in this order: those four
+releases, then the `hr` database (below), then hr itself.
+
+After the first start a platform administrator creates the two platform-scoped
+scheduler tasks in the scheduler UI: `hr:reconcile-signing` (suggested
+`*/15 * * * *`) and `hr:sync-members` (suggested `0 * * * *`); each tenant's HR
+administrator creates the tenant task `hr:carry-over` (suggested `30 0 1 1 *`).
+Without them signing outcomes missed by the event consumer are never applied,
+members who left the tenant keep their open requests and unused days are not
+carried over.
+
+An existing stack (TimescaleDB volume created before this change) does not re-run
+`init-db.sql`; create the database once:
+
+```sh
+docker compose exec -T timescaledb psql -U postgres <<'SQL'
+CREATE DATABASE hr;
+\c hr
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE ROLE hr_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE hr TO hr_app;
+SQL
+docker compose up -d signing auth notification scheduler   # feature-028 images
+docker compose up -d valkey gateway-bootstrap hr-token hr
 ```
 
 ## DNS (dev)

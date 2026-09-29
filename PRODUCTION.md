@@ -48,10 +48,10 @@ Contents:
      +--> auth (identity, tokens, operator invites, OpenFGA)      control plane
      +--> lcm  (mesh CA + certificate lifecycle, ACME)            CA
      +--> notification  warden  deployer  paperless  inventory    modules
-          ipam  asset  ticket  dns  scheduler  signing            (inventory ingest :9977)
+          ipam  asset  ticket  dns  scheduler  signing  hr        (inventory ingest :9977)
                          |
   ---------------------- internal compose network only ----------------------
-  TimescaleDB (one instance, 15 databases)   Valkey (cache, leases, event bus)
+  TimescaleDB (one instance, 16 databases)   Valkey (cache, leases, event bus)
   OpenFGA (auth's authorization store)       Vault (warden's secret store)
   RustFS (S3: paperless, asset, ticket,      Tika + Gotenberg (paperless extraction)
           signing)
@@ -85,7 +85,7 @@ Contents:
 |---|---|
 | `lcm`, `lcm-bootstrap`, `renewer`, `auth`, `auth-bootstrap`, `gateway`, `gateway-bootstrap`, `certs-init`, `*-token` jobs | **Required** (platform core) |
 | TimescaleDB, Valkey, OpenFGA (+ `openfga-migrate`) | **Required** |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing` | Modules. `ipam` depends on `warden`; `asset` on `inventory`; `dns` on `ipam`, `pdns-*`. `scheduler` runs the scheduled tasks of `ipam`, `lcm`, `notification` and `signing` (their configs name it in `task_scheduler`; drop it only together with those keys). `signing` uses `notification`, `warden`, `scheduler` and RustFS. Removing one means editing the compose file (verify dependencies before you drop any). |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing`, `hr` | Modules. `ipam` depends on `warden`; `asset` on `inventory`; `dns` on `ipam`, `pdns-*`. `scheduler` runs the scheduled tasks of `ipam`, `lcm`, `notification`, `signing` and `hr` (their configs name it in `task_scheduler`; drop it only together with those keys). `signing` uses `notification`, `warden`, `scheduler` and RustFS; `hr` uses `auth`, `notification`, `signing` and `scheduler`. Removing one means editing the compose file (verify dependencies before you drop any). |
 | Vault (+ `vault-init`) | **Required** for `warden`; must run as a real server (section 4.7), never in dev mode |
 | RustFS | Required for `paperless`, `asset`, `ticket`, `signing` (or point them at another S3 endpoint with TLS) |
 | Tika, Gotenberg | Required for `paperless` |
@@ -213,6 +213,7 @@ start-up. Taken from each service's `internal/config/config.go`:
 | dns | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; **`file:` secret references are rejected when resolved** |
 | scheduler | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
 | signing | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; `object_store.use_ssl: false` |
+| hr | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
 
 The development configs trip these immediately; for example every service
 except the gateway stops with `config: db.dsn must use sslmode=verify-full (or
@@ -295,6 +296,8 @@ Changes it makes in `prod/configs/`:
 - signing gets the generic changes too (its `links.portal_base_url` becomes the
   public origin) plus a fresh `prod/keys/signing.kek`; `qes` (BISS origin proof)
   stays empty.
+- hr (no KEK, no object store) gets only the generic changes, its
+  `links.portal_base_url` becoming the public origin.
 - `discovery.static.warden: ["warden:9843"]` for ipam/ticket/dns (the
   development configs name port 9743; warden listens on 9843,
   `configs/warden.yaml` `server.grpc_addr`).
@@ -723,7 +726,7 @@ P=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$
 
 # 1. stop the application services (databases, Valkey, OpenFGA, Vault keep running;
 #    restarting Vault would seal it)
-APPS="renewer lcm auth gateway notification warden deployer paperless inventory ipam asset ticket dns scheduler signing"
+APPS="renewer lcm auth gateway notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr"
 docker compose stop $APPS
 
 # 2. configs and .env
@@ -786,7 +789,7 @@ Named volumes are `<COMPOSE_PROJECT_NAME>_<name>`.
 
 | Volume | Content | Loss means |
 |---|---|---|
-| `pgdata` (overlay) | TimescaleDB: all 15 databases (`auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga`), incl. the sealed mesh root CA | **everything** |
+| `pgdata` (overlay) | TimescaleDB: all 16 databases (`auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing hr openfga`), incl. the sealed mesh root CA | **everything** |
 | `vault-data` (overlay) | Vault storage (warden secrets) | all warden secrets |
 | `rustfs-data` | documents, asset photos, ticket attachments, signing templates and signed PDFs | all files |
 | `pdns-auth-data` | PowerDNS zone database (SQLite) | served zones |
@@ -823,7 +826,7 @@ B=/backup/tangra/$(date +%F); mkdir -p "$B"; cd /opt/tangra
 
 # 1. databases (custom format, per database) + roles
 docker compose exec -T timescaledb pg_dumpall -U postgres --globals-only > "$B/globals.sql"
-for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga; do
+for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing hr openfga; do
   docker compose exec -T timescaledb pg_dump -U postgres -Fc -d "$db" > "$B/$db.dump"
 done
 
@@ -854,7 +857,7 @@ extensions:
 
 ```sh
 docker compose up -d timescaledb
-for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga; do
+for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing hr openfga; do
   docker compose exec -T timescaledb psql -U postgres -d "$db" -c 'SELECT timescaledb_pre_restore();'
   docker compose exec -T timescaledb pg_restore -U postgres -d "$db" --clean --if-exists < "$B/$db.dump"
   docker compose exec -T timescaledb psql -U postgres -d "$db" -c 'SELECT timescaledb_post_restore();'
@@ -912,7 +915,7 @@ Open it, set a password and TOTP, then sign in at `https://<PUBLIC_HOST>`.
 ```sh
 docker compose ps                               # long-running services "healthy"
 docker compose ps -a --status exited            # one-shot jobs: exit 0
-for s in notification warden deployer paperless inventory ipam asset ticket dns scheduler signing; do
+for s in notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr; do
   printf '%-13s ' "$s"; docker compose logs "$s" 2>&1 | grep '"gateway lease"' | tail -1 | grep -o '"registered":[a-z]*'
 done                                            # expect "registered":true
 docker compose exec lcm wget -qO- http://127.0.0.1:9591/readyz   # "ready"
@@ -922,7 +925,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://tangra.example.com/
 Admin (health/metrics) listeners, loopback inside each container:
 lcm 9591, auth 9190, gateway 9290, warden 9490, notification 9590, deployer
 9690, paperless 9790, inventory 9810, ipam 9820, asset 9830, ticket 9840, dns
-9850, scheduler 9800, signing 9860 - `/healthz`, `/readyz`, `/metrics`.
+9850, scheduler 9800, signing 9860, hr 9870 - `/healthz`, `/readyz`, `/metrics`.
 
 ### Gateway allow-list
 
@@ -1105,6 +1108,56 @@ BISS origin proof (`qes.origin_cert_file` / `origin_key_file` in
 `prod/configs/signing.yaml`) stays empty unless you mount a certificate and key
 into the container.
 
+#### HR (feature 028)
+
+New module `hr` (image `HR_IMAGE`, own release line starting at 4.0.0): leave
+management - leave types, allowances and carry-over, requests with manager
+approval, departments, holidays and the team calendar; leave documents are
+signed through `signing`. It seals nothing and stores no files (no KEK, no
+RustFS); it has a database (with the `btree_gist` extension for an exclusion
+constraint), a Valkey ACL user and the allow-list entry
+`spiffe://<TRUST_DOMAIN>/svc/hr=/api/hr;hr`.
+
+Its outbound calls need rules in the callees' policies, which `prod-init.sh`
+writes to `prod/policies/`: auth `hr-directory` (`/auth.v1.Profiles/Lookup`,
+`ListMembers`, `Contacts`), notification `modules-send` (+ `svc/hr`, the `hr.*`
+system templates), scheduler `modules-register` (+ `svc/hr`) and signing
+`hr-module-api` (the module API `signing.v1.ModuleSubmissions`). **Pin the
+feature-028 releases of signing (module API), auth, notification (hr.*
+templates) and scheduler first.** On an existing installation, in this order:
+
+```sh
+# 0. back up (section 5); refresh docker-compose.yaml and docker-compose.override.yaml
+#    from the examples (hr, hr-token, Valkey ACL user, allow-list)
+# 1. .env: SIGNING_IMAGE, AUTH_IMAGE, NOTIFICATION_IMAGE, SCHEDULER_IMAGE = their
+#    feature-028 releases; HR_IMAGE=ghcr.io/go-tangra/go-tangra-hr:4.0.0
+./scripts/prod-init.sh     # adds HR_DB_PASSWORD, prod/configs/hr.yaml and the
+                           # new prod/policies (existing configs are kept)
+. prod/credentials.env
+# prod/configs/scheduler.yaml, discovery.static:  hr: ["hr:9925"]
+# 2. the feature-028 releases of signing, auth, notification and scheduler
+docker compose up -d signing auth notification scheduler
+# 3. database + role (init-db.sql only runs on a fresh pgdata volume)
+docker compose exec -T timescaledb psql -U postgres <<SQL
+CREATE DATABASE hr;
+\c hr
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE ROLE hr_app LOGIN PASSWORD '${HR_DB_PASSWORD}' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE hr TO hr_app;
+SQL
+# 4. hr (Valkey is recreated for the new ACL user; clients reconnect)
+docker compose up -d valkey gateway-bootstrap hr-token hr
+```
+
+After the first start a platform administrator creates, in the scheduler UI, one
+platform-scoped task of each type: `hr:reconcile-signing` (suggested
+`*/15 * * * *`; applies signing outcomes of requests awaiting signing too long)
+and `hr:sync-members` (suggested `0 * * * *`; marks members who left the tenant
+inactive, cancels their open requests and re-routes approvals). Each tenant's HR
+administrator creates the tenant task `hr:carry-over` (suggested
+`30 0 1 1 *`; carries unused days into the next year).
+
 #### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
 
 Permissions become module-scoped (`warden:secrets:read`) and every module
@@ -1236,6 +1289,7 @@ Valkey and job workers use database leases, but it is untested here).
 | ipam BMC/SNMP secrets, ticket or dns cannot reach warden (`connection refused` to warden:9743) | Development configs name port 9743; warden listens on 9843. `prod-init.sh` fixes `discovery.static.warden`; check hand-made configs. |
 | ipam, lcm or notification exits: `config: ... field task_scheduler not found` (or `field notification not found` in lcm) | The config carries the feature-026 scheduler keys but the image predates them. Pin the feature-026 image (`IPAM_IMAGE` / `LCM_IMAGE` / `NOTIFICATION_IMAGE`) or remove the keys (section 7, "Scheduler"). |
 | signing exits: `config: ...` or cannot resolve signers / send mail / register tasks (`PermissionDenied`) | The callee images predate feature 027: pin the feature-027 releases of auth, notification, scheduler and warden and re-run `prod-init.sh` for the policies (section 7, "Signing"). |
+| hr exits: `config: ...` or cannot list people / send mail / start signing / register tasks (`PermissionDenied`) | The callee images predate feature 028: pin the feature-028 releases of auth, notification, signing and scheduler and re-run `prod-init.sh` for the policies (section 7, "HR"). |
 | Disk full (`ENOSPC`) | Log rotation (section 2); `docker system df`; `docker image prune` after upgrades; RustFS and database growth; inventory keeps snapshots `retention.days` (90). |
 
 ---

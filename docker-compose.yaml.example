@@ -22,7 +22,7 @@ services:
   valkey:
     image: ${VALKEY_IMAGE:-valkey/valkey:8}
     environment: { TZ: "${TZ:-UTC}" }
-    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "scheduler", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "signing", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "scheduler", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "signing", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "hr", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
     healthcheck: { test: ["CMD","valkey-cli","-a","${VALKEY_PASSWORD:-dev}","ping"], interval: 3s, timeout: 3s, retries: 40 }
   openfga-migrate:
     image: ${OPENFGA_IMAGE:-openfga/openfga:v1.20.0}
@@ -193,7 +193,8 @@ services:
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/ticket=/api/ticket;ticket",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns=/api/dns;dns",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/scheduler=/api/scheduler;scheduler",
-      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/signing=/api/signing;signing"]
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/signing=/api/signing;signing",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/hr=/api/hr;hr"]
     volumes: ["certs:/certs:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -800,6 +801,43 @@ services:
       signing-token: { condition: service_completed_successfully }
       rustfs: { condition: service_healthy }
 
+  # Mint hr's single-use join token (enrolls via the gateway edge for its mesh SVID).
+  hr-token:
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
+    user: "0:0"
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/hr","-ttl","30m","-out","/tokens/hr.token"]
+    volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
+    restart: "no"
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      openfga: { condition: service_started }
+      auth-bootstrap: { condition: service_completed_successfully }
+
+  # hr (feature 028): leave management - leave types, allowances and carry-over,
+  # requests with manager approval, departments, holidays and the team calendar.
+  # Browser API via the gateway (/api/hr), UI remote at /m/hr/. Lists people
+  # through auth, sends mail through notification, starts leave documents
+  # through signing's module API and registers its task types with the
+  # scheduler. Seals nothing (no KEK) and stores no files (no object store).
+  # No host port. Its own release line: HR_IMAGE (default 4.0.0) instead of
+  # TANGRA_VERSION.
+  hr:
+    image: ${HR_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-hr:4.0.0}
+    environment: { TZ: "${TZ:-UTC}" }
+    user: "0:0"
+    command: ["-config","deploy/container.yaml"]
+    volumes: ["tokens:/tokens:ro","hr-state:/state","./configs/hr.yaml:/app/deploy/container.yaml:ro"]
+    healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:9870/readyz"], interval: 5s, timeout: 3s, retries: 60, start_period: 10s }
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+      lcm: { condition: service_healthy }
+      lcm-bootstrap: { condition: service_completed_successfully }
+      hr-token: { condition: service_completed_successfully }
+      signing: { condition: service_healthy }
+
 networks:
   # Fixed small subnet so configs/auth.yaml can allow-list exactly the openldap
   # address (directory.targets.allow_cidrs); created even without the profile.
@@ -827,6 +865,7 @@ volumes:
   dns-state:
   scheduler-state:
   signing-state:
+  hr-state:
   dns-secrets:
   pdns-auth-data:
   pdns-auth-conf:
