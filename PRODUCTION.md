@@ -956,6 +956,14 @@ docker compose up -d
 docker compose ps
 ```
 
+When you upgrade services one by one (`up -d --no-deps <svc>`), also recreate
+the **renewer** whenever `LCM_IMAGE` or `configs/lcm.yaml` changes: it runs the
+lcm image with the lcm config, and an old image refuses keys that a newer
+config adds. It then fails every renewal silently, and the 12-hour
+certificates of gateway, auth, lcm and notification expire (`identity_expired`
+in their logs). Check with `docker logs --tail 3 <project>-renewer-1` — the
+last line must be `renewed HH:MM:SS`.
+
 Every service applies its database migrations on start (goose `Up`, embedded
 SQL, under a Postgres advisory lock; `app.Options{Migrate: true}` in each
 service's `cmd/`) using `db.migrate_dsn`. auth and the gateway accept
