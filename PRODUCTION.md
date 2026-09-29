@@ -1090,10 +1090,9 @@ reminders are sent.
 
 Qualified signing through B-Trust BISS needs the portal edge to allow browser
 connections to the BISS ports on the signer's computer. `configs/gateway.yaml`
-carries `edge.connect_sources` (`https://localhost:53952` ... `53955`)
-commented out, because the current portal image refuses unknown keys: with the
-portal release that reads it (framework >= 4.2.4) uncomment it in
-`prod/configs/gateway.yaml` and `docker compose up -d gateway`. The optional
+carries `edge.connect_sources` (`https://localhost:53952` ... `53955`,
+portal >= 4.4.2); an existing installation adds it to
+`prod/configs/gateway.yaml` by hand and recreates the gateway. The optional
 BISS origin proof (`qes.origin_cert_file` / `origin_key_file` in
 `prod/configs/signing.yaml`) stays empty unless you mount a certificate and key
 into the container.

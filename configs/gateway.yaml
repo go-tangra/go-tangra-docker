@@ -27,11 +27,9 @@ edge:
   allowed_origins: ["https://localhost:8443", "https://127.0.0.1:8443"]
   rate_limit: { per_second: 200, burst: 400 }
   # Qualified signing through B-Trust BISS on the signer's computer (signing
-  # feature 027): browser connections to the local BISS ports (connect-src only).
-  # Needs the portal release with edge.connect_sources (framework >= 4.2.4); the
-  # current portal image refuses unknown keys, so enable it together with that
-  # GATEWAY_IMAGE. prod-init.sh leaves these localhost origins as they are.
-  # connect_sources: ["https://localhost:53952", "https://localhost:53953", "https://localhost:53954", "https://localhost:53955"]
+  # feature 027): browser connections to the local BISS ports (connect-src only;
+  # portal >= 4.4.2). prod-init.sh leaves these localhost origins as they are.
+  connect_sources: ["https://localhost:53952", "https://localhost:53953", "https://localhost:53954", "https://localhost:53955"]
 public_origin: https://localhost:8443
 # KVM console listener (portal feature 025): BMC consoles (ipam /bmc/) are
 # served on an origin of their own so vendor JavaScript never runs on the

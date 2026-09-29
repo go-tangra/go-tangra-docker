@@ -363,9 +363,7 @@ nothing expires and no reminders are sent.
 
 Qualified signing through B-Trust BISS needs the portal to allow browser
 connections to the local BISS ports: `edge.connect_sources` in
-`configs/gateway.yaml` is prepared but commented out - the current portal image
-refuses unknown keys; enable it with the portal release that reads it
-(framework >= 4.2.4). The optional BISS origin proof (`qes` in
+`configs/gateway.yaml` (portal >= 4.4.2). The optional BISS origin proof (`qes` in
 `configs/signing.yaml`) is left empty.
 
 An existing stack (TimescaleDB volume created before this change) does not re-run
