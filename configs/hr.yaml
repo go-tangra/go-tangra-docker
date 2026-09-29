@@ -1,0 +1,63 @@
+# hr (feature 028). Development values: plaintext Valkey and database
+# connections and insecure enrolment are named opt-outs the service prints as
+# warnings; prod-init.sh rewrites them into prod/configs/hr.yaml. hr seals
+# nothing (no KEK) and stores no files (no object store).
+service_name: hr
+trust_domain: example.org
+env: dev
+# The module obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/hr.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9925, http_addr: 0.0.0.0:9926 }
+admin: { addr: 127.0.0.1:9870 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    notification: ["notification:9943"]
+    scheduler: ["scheduler:9905"]
+    signing: ["signing:9915"]
+# Backup restores carry up to 256 MiB.
+limits: { max_request_bytes: 268435456 }
+db:
+  dsn: postgres://hr_app:dev@timescaledb:5432/hr?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/hr?sslmode=disable
+  max_conns: 16
+valkey: { addresses: ["valkey:6379"], username: hr, password: dev, allow_plaintext: true }
+events: { enabled: true }
+platform_tenant_id: "00000000-0000-0000-0000-000000000001"
+auth: { service: auth }
+notification: { service: notification }
+# Leave documents are started through signing's module API
+# (signing.v1.ModuleSubmissions; allowed by rule hr-module-api in policies/signing.yaml).
+signing: { service: signing }
+# Registers hr:reconcile-signing, hr:sync-members (platform-scoped) and
+# hr:carry-over (tenant-scoped) with the scheduler (svc/scheduler calls
+# scheduler.v1.TaskExecutor/ExecuteTask; allowed by policies/hr.yaml). A platform
+# administrator creates the platform tasks, each tenant's HR administrator the
+# carry-over task, in the scheduler UI after the first start.
+task_scheduler: { enabled: true, service: scheduler }
+# Base of the links in hr e-mails; prod-init.sh rewrites it to the public origin.
+links: { portal_base_url: https://localhost:8443 }
+limits_hr:
+  max_page_size: 100
+  max_calendar_days: 93
+  max_request_days: 366
+  max_import_bytes: 65536
+  max_import_lines: 500
+  max_backup_bytes: 268435456
+  max_department_depth: 10
+consumer: { enabled: true, block_ms: 2000, batch: 100, tenants_refresh_seconds: 30 }
+reconcile: { older_than_minutes: 10 }
+outbox: { interval_ms: 2000, batch: 50, max_attempts: 5 }
+gateway: { service: gateway, issuer: https://localhost:8443 }

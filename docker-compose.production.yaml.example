@@ -61,7 +61,8 @@ services:
       "--user", "ticket", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+      "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "hr", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -232,6 +233,7 @@ services:
   dns-token: { environment: *tangra-env, volumes: *auth-volumes }
   scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
   signing-token: { environment: *tangra-env, volumes: *auth-volumes }
+  hr-token: { environment: *tangra-env, volumes: *auth-volumes }
 
   # ---------------------------------------------------------------- modules
   notification:
@@ -346,6 +348,14 @@ services:
       - "./prod/keys/signing.kek:/app/deploy/kek.dev:ro"
       - "./prod/configs/signing.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/signing.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # No KEK and no object store: only its config, policy and the internal CA.
+  hr:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/hr.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/hr.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
 
 volumes:

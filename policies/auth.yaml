@@ -1,5 +1,6 @@
 # Copy of deploy/policy.yaml from the feature-027 go-tangra-auth image (the policy
-# built into the image; adds `signing-directory` with /auth.v1.Profiles/Contacts).
+# built into the image; adds `signing-directory` with /auth.v1.Profiles/Contacts;
+# the feature-028 release adds `hr-directory`).
 # prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in place of
 # example.org; the production overlay mounts that over the image's copy.
 # Freya service-to-service policy for the auth service: platform services may
@@ -35,6 +36,12 @@ rules:
   - id: signing-directory
     # signing (feature 027) resolves signers and their contact addresses.
     from: ["spiffe://example.org/svc/signing"]
+    to: ["auth"]
+    operations: ["/auth.v1.Profiles/Lookup", "/auth.v1.Profiles/ListMembers", "/auth.v1.Profiles/Contacts"]
+    effect: allow
+  - id: hr-directory
+    # hr (feature 028) lists tenant members and resolves their contact addresses.
+    from: ["spiffe://example.org/svc/hr"]
     to: ["auth"]
     operations: ["/auth.v1.Profiles/Lookup", "/auth.v1.Profiles/ListMembers", "/auth.v1.Profiles/Contacts"]
     effect: allow
