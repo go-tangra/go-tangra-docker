@@ -60,7 +60,8 @@ services:
       "--user", "asset", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "ticket", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+      "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -230,6 +231,7 @@ services:
   ticket-token: { environment: *tangra-env, volumes: *auth-volumes }
   dns-token: { environment: *tangra-env, volumes: *auth-volumes }
   scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
+  signing-token: { environment: *tangra-env, volumes: *auth-volumes }
 
   # ---------------------------------------------------------------- modules
   notification:
@@ -333,6 +335,17 @@ services:
     volumes:
       - "./prod/configs/scheduler.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/scheduler.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # The KEK seals the tenant CA, system/administrator keys and field values:
+  # back up prod/keys/signing.kek with the database. For the optional BISS
+  # origin proof (configs/signing.yaml qes), mount the certificate and key here.
+  signing:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/signing.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/signing.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/signing.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
 
 volumes:

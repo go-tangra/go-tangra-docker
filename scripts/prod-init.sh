@@ -94,9 +94,9 @@ if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="
 [ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
 if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
 
-SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler"
+SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing"
 # scheduler stores no secrets: no KEK.
-KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns"
+KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns signing"
 
 umask 077
 mkdir -p prod/keys prod/configs prod/secrets prod/edge prod/acme

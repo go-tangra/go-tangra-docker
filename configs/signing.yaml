@@ -1,0 +1,88 @@
+# signing (feature 027). Development values: plaintext Valkey and database
+# connections, plain-http object store and insecure enrolment are named opt-outs
+# the service prints as warnings; prod-init.sh rewrites them (and the RustFS
+# credentials, the same as paperless's) into prod/configs/signing.yaml.
+service_name: signing
+trust_domain: example.org
+env: dev
+# The module obtains its own mesh SVID by ENROLLING with lcm over the network
+# (app.Build injects the provider when mesh_enroll.enabled); identity is provided.
+identity:
+  provider: provided
+mesh_enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/signing.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9915, http_addr: 0.0.0.0:9916 }
+admin: { addr: 127.0.0.1:9860 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    notification: ["notification:9943"]
+    scheduler: ["scheduler:9905"]
+    warden: ["warden:9843"]
+# Template uploads and verification carry PDFs of up to 50 MiB.
+limits: { max_request_bytes: 67108864 }
+db:
+  dsn: postgres://signing_app:dev@timescaledb:5432/signing?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/signing?sslmode=disable
+  max_conns: 16
+valkey: { addresses: ["valkey:6379"], username: signing, password: dev, allow_plaintext: true }
+events: { enabled: true }
+platform_tenant_id: "00000000-0000-0000-0000-000000000001"
+# Seals the tenant CA, audit-trail and administrator keys (never in clear).
+kek: { source: file, path: deploy/kek.dev }
+object_store:
+  endpoint: rustfs:9000
+  bucket: signing
+  region: us-east-1
+  use_ssl: false
+  access_key: paperless
+  secret_key: paperless-dev-secret
+auth: { service: auth }
+notification: { service: notification }
+warden: { service: warden }
+# Registers signing:expire-submissions and signing:send-reminders with the
+# scheduler (svc/scheduler calls scheduler.v1.TaskExecutor/ExecuteTask; allowed
+# by policies/signing.yaml). Both are platform-scoped: a platform administrator
+# creates one task of each in the scheduler UI after the first start.
+task_scheduler: { enabled: true, service: scheduler }
+# Base of the links in signing e-mails; prod-init.sh rewrites it to the public origin.
+links: { portal_base_url: https://localhost:8443 }
+limits_signing:
+  max_pdf_bytes: 52428800
+  max_pdf_pages: 500
+  max_fields: 500
+  max_signers: 50
+  max_image_bytes: 1048576
+  max_field_upload_bytes: 5242880
+  parse_timeout_seconds: 20
+  max_page_size: 100
+  max_backup_bytes: 2147483648
+  signings_per_minute: 10
+  qes_preparation_minutes: 10
+signing:
+  ca_validity_years: 10
+  ca_renew_before_years: 2
+  cert_validity_years: 2
+  crl_validity_days: 7
+  pin_min: 6
+  pin_max: 32
+  pin_iterations: 600000
+  lock_attempts: 5
+  lock_minutes: 15
+  audit_job_max_attempts: 10
+  audit_job_interval_ms: 2000
+verify: { use_system_roots: true, extra_roots_file: "" }
+# B-Trust BISS origin proof (signedContents): the portal's certificate and key
+# (PEM). Both or neither; without them BISS installations that require the
+# proof refuse to sign. Left empty here: to enable it, mount the files into the
+# container (production overlay) and name their paths.
+qes: { origin_cert_file: "", origin_key_file: "" }
+gateway: { service: gateway, issuer: https://localhost:8443 }

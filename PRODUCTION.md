@@ -48,12 +48,13 @@ Contents:
      +--> auth (identity, tokens, operator invites, OpenFGA)      control plane
      +--> lcm  (mesh CA + certificate lifecycle, ACME)            CA
      +--> notification  warden  deployer  paperless  inventory    modules
-          ipam  asset  ticket  dns  scheduler                     (inventory ingest :9977)
+          ipam  asset  ticket  dns  scheduler  signing            (inventory ingest :9977)
                          |
   ---------------------- internal compose network only ----------------------
-  TimescaleDB (one instance, 14 databases)   Valkey (cache, leases, event bus)
+  TimescaleDB (one instance, 15 databases)   Valkey (cache, leases, event bus)
   OpenFGA (auth's authorization store)       Vault (warden's secret store)
-  RustFS (S3: paperless, asset, ticket)      Tika + Gotenberg (paperless extraction)
+  RustFS (S3: paperless, asset, ticket,      Tika + Gotenberg (paperless extraction)
+          signing)
   External: SMTP relay (mail out), MTA (mail in -> ticket), Let's Encrypt (lcm ACME)
 ```
 
@@ -84,9 +85,9 @@ Contents:
 |---|---|
 | `lcm`, `lcm-bootstrap`, `renewer`, `auth`, `auth-bootstrap`, `gateway`, `gateway-bootstrap`, `certs-init`, `*-token` jobs | **Required** (platform core) |
 | TimescaleDB, Valkey, OpenFGA (+ `openfga-migrate`) | **Required** |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler` | Modules. `ipam` depends on `warden`; `asset` on `inventory`; `dns` on `ipam`, `pdns-*`. `scheduler` runs the scheduled tasks of `ipam`, `lcm` and `notification` (their configs name it in `task_scheduler`; drop it only together with those keys). Removing one means editing the compose file (verify dependencies before you drop any). |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing` | Modules. `ipam` depends on `warden`; `asset` on `inventory`; `dns` on `ipam`, `pdns-*`. `scheduler` runs the scheduled tasks of `ipam`, `lcm`, `notification` and `signing` (their configs name it in `task_scheduler`; drop it only together with those keys). `signing` uses `notification`, `warden`, `scheduler` and RustFS. Removing one means editing the compose file (verify dependencies before you drop any). |
 | Vault (+ `vault-init`) | **Required** for `warden`; must run as a real server (section 4.7), never in dev mode |
-| RustFS | Required for `paperless`, `asset`, `ticket` (or point them at another S3 endpoint with TLS) |
+| RustFS | Required for `paperless`, `asset`, `ticket`, `signing` (or point them at another S3 endpoint with TLS) |
 | Tika, Gotenberg | Required for `paperless` |
 | PowerDNS `pdns-auth`, `pdns-recursor` (+ `dns-secrets-init`) | Required for `dns` |
 | `edge-cert-init` | Harmless in production: it still fills the `edge-cert` volume, but the overlay mounts your public certificate at `/edge` instead |
@@ -211,6 +212,7 @@ start-up. Taken from each service's `internal/config/config.go`:
 | ticket | db sslmode; `valkey.allow_plaintext`; `object_store.use_ssl: false`; `inbound.insecure_dev`; `smtp.tls: none`; `mesh_enroll.insecure`; **`file:` secret references are rejected when resolved** |
 | dns | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; **`file:` secret references are rejected when resolved** |
 | scheduler | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
+| signing | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; `object_store.use_ssl: false` |
 
 The development configs trip these immediately; for example every service
 except the gateway stops with `config: db.dsn must use sslmode=verify-full (or
@@ -283,13 +285,16 @@ Changes it makes in `prod/configs/`:
 - notification `smtp.allow_plaintext: false`, `platform_email` from `SMTP_*`
   (section 4.6); lcm `acme.allow_plaintext_dns: false`;
   inventory `ingest.insecure: false`.
-- paperless/asset/ticket `object_store`: `use_ssl: true`, generated keys.
+- paperless/asset/ticket/signing `object_store`: `use_ssl: true`, generated keys.
 - ticket `smtp`: real relay, `tls: starttls` (587) or `implicit` (465),
   `allow_plaintext: false`, `mail_domain` from `MAIL_FROM`.
 - dns `docker.enabled: false` (section 8).
 - scheduler (no KEK, no secrets) gets only the generic changes above: TLS DSN,
   Valkey TLS, `trust_domain`, `gateway.issuer`, verified enrollment,
   `env: production`.
+- signing gets the generic changes too (its `links.portal_base_url` becomes the
+  public origin) plus a fresh `prod/keys/signing.kek`; `qes` (BISS origin proof)
+  stays empty.
 - `discovery.static.warden: ["warden:9843"]` for ipam/ticket/dns (the
   development configs name port 9743; warden listens on 9843,
   `configs/warden.yaml` `server.grpc_addr`).
@@ -329,7 +334,9 @@ openssl rand -base64 32 > prod/keys/<svc>.kek
 - **Never reuse `keys/*.kek`.** They are public development fixtures (two of
   them, `deployer.kek` and `notification.kek`, are even identical).
 - **Losing a KEK loses the data it sealed.** The lcm KEK protects the mesh root
-  CA; without it the lcm database backup is useless.
+  CA; without it the lcm database backup is useless. The signing KEK seals the
+  tenant signing CAs, system/administrator keys and field values; losing it
+  means re-issuing those certificates.
 - `kek.source: env` (with `kek.env: VAR_NAME`) is the alternative to a file.
 - There is no in-place KEK rotation command yet (lcm `docs/operations.md`:
   export a backup with credentials under the old key and import it under the new).
@@ -716,7 +723,7 @@ P=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$
 
 # 1. stop the application services (databases, Valkey, OpenFGA, Vault keep running;
 #    restarting Vault would seal it)
-APPS="renewer lcm auth gateway notification warden deployer paperless inventory ipam asset ticket dns scheduler"
+APPS="renewer lcm auth gateway notification warden deployer paperless inventory ipam asset ticket dns scheduler signing"
 docker compose stop $APPS
 
 # 2. configs and .env
@@ -779,9 +786,9 @@ Named volumes are `<COMPOSE_PROJECT_NAME>_<name>`.
 
 | Volume | Content | Loss means |
 |---|---|---|
-| `pgdata` (overlay) | TimescaleDB: all 14 databases (`auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler openfga`), incl. the sealed mesh root CA | **everything** |
+| `pgdata` (overlay) | TimescaleDB: all 15 databases (`auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga`), incl. the sealed mesh root CA | **everything** |
 | `vault-data` (overlay) | Vault storage (warden secrets) | all warden secrets |
-| `rustfs-data` | documents, asset photos, ticket attachments | all files |
+| `rustfs-data` | documents, asset photos, ticket attachments, signing templates and signed PDFs | all files |
 | `pdns-auth-data` | PowerDNS zone database (SQLite) | served zones |
 | `ticket-secrets`, `dns-secrets` | relay token, PowerDNS API keys | regenerable (reconfigure MTA / restart dns stack) |
 | `vault-creds` | warden AppRole credentials | regenerable with `vault-init` + admin token |
@@ -816,7 +823,7 @@ B=/backup/tangra/$(date +%F); mkdir -p "$B"; cd /opt/tangra
 
 # 1. databases (custom format, per database) + roles
 docker compose exec -T timescaledb pg_dumpall -U postgres --globals-only > "$B/globals.sql"
-for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler openfga; do
+for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga; do
   docker compose exec -T timescaledb pg_dump -U postgres -Fc -d "$db" > "$B/$db.dump"
 done
 
@@ -847,7 +854,7 @@ extensions:
 
 ```sh
 docker compose up -d timescaledb
-for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler openfga; do
+for db in auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing openfga; do
   docker compose exec -T timescaledb psql -U postgres -d "$db" -c 'SELECT timescaledb_pre_restore();'
   docker compose exec -T timescaledb pg_restore -U postgres -d "$db" --clean --if-exists < "$B/$db.dump"
   docker compose exec -T timescaledb psql -U postgres -d "$db" -c 'SELECT timescaledb_post_restore();'
@@ -905,7 +912,7 @@ Open it, set a password and TOTP, then sign in at `https://<PUBLIC_HOST>`.
 ```sh
 docker compose ps                               # long-running services "healthy"
 docker compose ps -a --status exited            # one-shot jobs: exit 0
-for s in notification warden deployer paperless inventory ipam asset ticket dns scheduler; do
+for s in notification warden deployer paperless inventory ipam asset ticket dns scheduler signing; do
   printf '%-13s ' "$s"; docker compose logs "$s" 2>&1 | grep '"gateway lease"' | tail -1 | grep -o '"registered":[a-z]*'
 done                                            # expect "registered":true
 docker compose exec lcm wget -qO- http://127.0.0.1:9591/readyz   # "ready"
@@ -915,7 +922,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://tangra.example.com/
 Admin (health/metrics) listeners, loopback inside each container:
 lcm 9591, auth 9190, gateway 9290, warden 9490, notification 9590, deployer
 9690, paperless 9790, inventory 9810, ipam 9820, asset 9830, ticket 9840, dns
-9850, scheduler 9800 - `/healthz`, `/readyz`, `/metrics`.
+9850, scheduler 9800, signing 9860 - `/healthz`, `/readyz`, `/metrics`.
 
 ### Gateway allow-list
 
@@ -1028,6 +1035,68 @@ docker compose up -d ipam
 
 Consumers without `task_scheduler` keep working (they just register no task
 types), so step 4 can follow later.
+
+#### Signing (feature 027)
+
+New module `signing` (image `SIGNING_IMAGE`, own release line starting at 4.0.0):
+PDF templates and submissions signed with personal PIN-protected certificates or
+qualified cards (B-Trust BISS), a per-tenant signing CA, verification and audit
+trails. It stores PDFs in RustFS (bucket `signing`, created on startup, the
+RustFS credentials `prod-init.sh` writes for paperless), has a KEK
+(`prod/keys/signing.kek`, sealing the tenant CA, system/administrator keys and
+field values - **back it up with the database**), a Valkey ACL user and the
+allow-list entry `spiffe://<TRUST_DOMAIN>/svc/signing=/api/signing;signing`.
+
+Its outbound calls need rules in the callees' policies, which `prod-init.sh`
+writes to `prod/policies/`: auth `signing-directory` (`/auth.v1.Profiles/Lookup`,
+`ListMembers`, `Contacts`), notification `modules-send` (+ `svc/signing`, the
+`signing.*` system templates), scheduler `modules-register` (+ `svc/signing`)
+and warden `signing-tsa-secrets` (`/warden.v1.Secrets/Get`, `GetPassword`, TSA
+credentials read on behalf of the signed-in user). **Pin the feature-027
+releases of auth (Profiles.Contacts), notification (signing.* templates),
+scheduler and warden first.** On an existing installation, in this order:
+
+```sh
+# 0. back up (section 5); refresh docker-compose.yaml and docker-compose.override.yaml
+#    from the examples (signing, signing-token, Valkey ACL user, allow-list)
+# 1. .env: AUTH_IMAGE, NOTIFICATION_IMAGE, SCHEDULER_IMAGE, WARDEN_IMAGE = their
+#    feature-027 releases; SIGNING_IMAGE=ghcr.io/go-tangra/go-tangra-signing:4.0.0
+./scripts/prod-init.sh     # adds SIGNING_DB_PASSWORD, prod/keys/signing.kek,
+                           # prod/configs/signing.yaml and the new prod/policies
+                           # (existing configs are kept)
+. prod/credentials.env
+# prod/configs/scheduler.yaml, discovery.static:  signing: ["signing:9915"]
+# 2. the feature-027 releases of auth, notification, scheduler and warden
+docker compose up -d auth notification scheduler warden
+# 3. database + role (init-db.sql only runs on a fresh pgdata volume)
+docker compose exec -T timescaledb psql -U postgres <<SQL
+CREATE DATABASE signing;
+\c signing
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE signing_app LOGIN PASSWORD '${SIGNING_DB_PASSWORD}' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE signing TO signing_app;
+SQL
+# 4. signing (Valkey is recreated for the new ACL user; clients reconnect)
+docker compose up -d valkey gateway-bootstrap signing-token signing
+# 5. back up prod/keys/signing.kek with the prod/ tree (section 5)
+```
+
+After the first start a platform administrator creates, in the scheduler UI, one
+platform-scoped task of each type: `signing:expire-submissions` (suggested
+`*/15 * * * *`) and `signing:send-reminders` (suggested `0 * * * *`; it also
+sweeps expired card preparations, deleted submissions' objects, expired
+downloads and republishes due CRLs). Without them nothing expires and no
+reminders are sent.
+
+Qualified signing through B-Trust BISS needs the portal edge to allow browser
+connections to the BISS ports on the signer's computer. `configs/gateway.yaml`
+carries `edge.connect_sources` (`https://localhost:53952` ... `53955`)
+commented out, because the current portal image refuses unknown keys: with the
+portal release that reads it (framework >= 4.2.4) uncomment it in
+`prod/configs/gateway.yaml` and `docker compose up -d gateway`. The optional
+BISS origin proof (`qes.origin_cert_file` / `origin_key_file` in
+`prod/configs/signing.yaml`) stays empty unless you mount a certificate and key
+into the container.
 
 #### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
 
@@ -1159,6 +1228,7 @@ Valkey and job workers use database leases, but it is untested here).
 | Restarted module cannot enroll (token already used / expired) | `docker compose up -d` re-mints join tokens; a persisted, still-valid SVID in `/state` is reused. |
 | ipam BMC/SNMP secrets, ticket or dns cannot reach warden (`connection refused` to warden:9743) | Development configs name port 9743; warden listens on 9843. `prod-init.sh` fixes `discovery.static.warden`; check hand-made configs. |
 | ipam, lcm or notification exits: `config: ... field task_scheduler not found` (or `field notification not found` in lcm) | The config carries the feature-026 scheduler keys but the image predates them. Pin the feature-026 image (`IPAM_IMAGE` / `LCM_IMAGE` / `NOTIFICATION_IMAGE`) or remove the keys (section 7, "Scheduler"). |
+| signing exits: `config: ...` or cannot resolve signers / send mail / register tasks (`PermissionDenied`) | The callee images predate feature 027: pin the feature-027 releases of auth, notification, scheduler and warden and re-run `prod-init.sh` for the policies (section 7, "Signing"). |
 | Disk full (`ENOSPC`) | Log rotation (section 2); `docker system df`; `docker image prune` after upgrades; RustFS and database growth; inventory keeps snapshots `retention.days` (90). |
 
 ---

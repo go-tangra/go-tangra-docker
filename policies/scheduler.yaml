@@ -1,12 +1,14 @@
-# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-scheduler:4.0.0 (the policy built
-# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
-# place of example.org; the production overlay mounts that over the image's copy.
+# Copy of deploy/policy.yaml from the feature-027 go-tangra-scheduler image (the policy
+# built into the image; adds svc/signing to `modules-register`). prod-init.sh writes
+# it to prod/policies/ with TRUST_DOMAIN in place of example.org; the production
+# overlay mounts that over the image's copy.
 # Freya service-to-service policy for scheduler (feature 026): the gateway forwards
 # browser traffic and probes health; executing modules register (and unregister)
 # their task types over the mesh (the handler limits each module to its own
 # "<module>:" namespace). The scheduler itself calls each module's
 # scheduler.v1.TaskExecutor/ExecuteTask, auth and lcm as a client — those rules
-# live in the callee's policy (`scheduler-execute` in ipam, lcm, notification).
+# live in the callee's policy (`scheduler-execute` in ipam, lcm, notification,
+# signing).
 # A new executing module is added to `modules-register`.
 version: scheduler-dev-1
 rules:
@@ -16,7 +18,7 @@ rules:
     operations: ["*"]
     effect: allow
   - id: modules-register
-    from: ["spiffe://example.org/svc/ipam", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/notification"]
+    from: ["spiffe://example.org/svc/ipam", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/notification", "spiffe://example.org/svc/signing"]
     to: ["scheduler"]
     operations: ["/scheduler.v1.Registration/RegisterTaskTypes", "/scheduler.v1.Registration/UnregisterTaskTypes"]
     effect: allow

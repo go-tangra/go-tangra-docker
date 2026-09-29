@@ -22,9 +22,12 @@ image `go-tangra-portal`), `notification`, `warden` (secrets, backed by Vault),
 `inventory` (endpoint agents report hardware/software/network snapshots; ingest
 edge on `:9977`), `ipam` (subnets/IPs/devices/VLANs + active discovery and
 IPMI/KVM), `asset` (IT asset management with inventory sync), `ticket` (helpdesk
-with an inbound mail edge on `:9957`), `dns` (PowerDNS management plane) and
-`scheduler` (central task scheduler: ipam, lcm and notification register their
-task types; periodic, delayed and wait-for-result tasks, retries, history).
+with an inbound mail edge on `:9957`), `dns` (PowerDNS management plane),
+`scheduler` (central task scheduler: ipam, lcm, notification and signing register
+their task types; periodic, delayed and wait-for-result tasks, retries, history)
+and `signing` (PDF templates and submissions signed with personal PIN-protected
+certificates or qualified cards via B-Trust BISS; per-tenant signing CA,
+verification, audit trails).
 Each service's own repository (`go-tangra-<name>`, see `deploy/README.md` there)
 documents its configuration in depth.
 
@@ -99,7 +102,7 @@ TANGRA_VERSION=4.0.1 ./up.sh      # or set it in .env
 | `auth` (+ `auth-bootstrap`, `*-token` init jobs) | `go-tangra-auth` | `AUTH_IMAGE` |
 | `gateway` (+ `gateway-bootstrap`) | `go-tangra-portal` | `GATEWAY_IMAGE` |
 | `lcm` (+ `lcm-bootstrap`, `renewer`) | `go-tangra-lcm` | `LCM_IMAGE` |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler` | `go-tangra-<name>` | `<NAME>_IMAGE` |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing` | `go-tangra-<name>` | `<NAME>_IMAGE` |
 
 Third-party images are variables too (`TIMESCALEDB_IMAGE`, `VALKEY_IMAGE`, …;
 see `.env.example`). Each service image carries its own `deploy/` directory
@@ -332,6 +335,54 @@ docker compose up -d valkey gateway-bootstrap scheduler-token scheduler
 docker compose up -d notification lcm ipam      # with the feature-026 images
 ```
 
+## Signing (feature 027)
+
+`signing` (gRPC 9915, HTTP 9916, admin 127.0.0.1:9860; no host port) enrolls
+like the other modules (`signing-token`), is reached through the gateway under
+`/api/signing` (allow-list entry in `gateway-bootstrap`) and shows its UI at
+`/m/signing/`. It has its own release line: `SIGNING_IMAGE` (default
+`go-tangra-signing:4.0.0`), not `TANGRA_VERSION`. It stores PDFs in RustFS
+(bucket `signing`, created on startup, same RustFS credentials as paperless) and
+mounts a KEK (`keys/signing.kek` at `/app/deploy/kek.dev`) that seals the tenant
+signing CA, the system/administrator keys and field values - in production back
+up `prod/keys/signing.kek` together with the database.
+
+Its outbound calls need rules in the callees' policies (`policies/`): auth
+`signing-directory` (`Profiles/Lookup`, `ListMembers`, `Contacts`), notification
+`modules-send` (the `signing.*` system templates), scheduler `modules-register`
+(plus `discovery.static.signing` in `configs/scheduler.yaml`) and warden
+`signing-tsa-secrets` (TSA credentials read on behalf of the signed-in user).
+**These need the feature-027 releases of auth (Profiles.Contacts), notification
+(signing.* templates), scheduler and warden.** Roll out in this order: those
+four releases, then the `signing` database (below), then signing itself.
+
+After the first start a platform administrator creates the two platform-scoped
+scheduler tasks in the scheduler UI: `signing:expire-submissions` (suggested
+`*/15 * * * *`) and `signing:send-reminders` (suggested `0 * * * *`). Without them
+nothing expires and no reminders are sent.
+
+Qualified signing through B-Trust BISS needs the portal to allow browser
+connections to the local BISS ports: `edge.connect_sources` in
+`configs/gateway.yaml` is prepared but commented out - the current portal image
+refuses unknown keys; enable it with the portal release that reads it
+(framework >= 4.2.4). The optional BISS origin proof (`qes` in
+`configs/signing.yaml`) is left empty.
+
+An existing stack (TimescaleDB volume created before this change) does not re-run
+`init-db.sql`; create the database once:
+
+```sh
+docker compose exec -T timescaledb psql -U postgres <<'SQL'
+CREATE DATABASE signing;
+\c signing
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE signing_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE signing TO signing_app;
+SQL
+docker compose up -d auth notification warden scheduler   # feature-027 images
+docker compose up -d valkey gateway-bootstrap signing-token signing
+```
+
 ## DNS (dev)
 
 `dns-secrets-init` generates the PowerDNS and recursor API keys once into the
@@ -406,7 +457,7 @@ change them together with the variables:
 | `configs/<service>.yaml` `database.dsn` + `init-db.sql` | `<service>_app` role password `dev` | each other |
 | `configs/<service>.yaml` `valkey.password` | `dev` (user = service name) | `VALKEY_PASSWORD` |
 | `configs/auth.yaml` `openfga.preshared_key` | `dev-openfga-key` | `OPENFGA_PRESHARED_KEY` |
-| `configs/{paperless,asset,ticket}.yaml` `access_key` / `secret_key` | `paperless` / `paperless-dev-secret` | `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` |
+| `configs/{paperless,asset,ticket,signing}.yaml` `access_key` / `secret_key` | `paperless` / `paperless-dev-secret` | `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY` |
 | `keys/<service>.kek` | development key-encryption keys | — |
 | `ldap/openldap/people.ldif`, `slapd.ldif` (profile `ldap`) | `cn=reader` / `reader-password`, `cn=admin` / `admin-password` | the `openldap` healthcheck |
 

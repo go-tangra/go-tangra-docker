@@ -92,3 +92,9 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE ROLE scheduler_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
 GRANT CONNECT ON DATABASE scheduler TO scheduler_app;
 \c postgres
+CREATE DATABASE signing;
+\c signing
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE signing_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE signing TO signing_app;
+\c postgres

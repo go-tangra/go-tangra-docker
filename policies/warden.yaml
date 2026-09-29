@@ -1,6 +1,7 @@
 # Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-warden:4.3.3 (the policy built
 # into the image) plus rule ipam-bmc-secrets (warden branch 024-ipam-secret-access; built
-# into the image from the next warden release). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# into the image from the next warden release) and rule signing-tsa-secrets (feature 027;
+# needs the warden release that includes it). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
 # place of example.org; the production overlay mounts that over the image's copy.
 # Freya service-to-service policy for warden: the gateway forwards browser
 # traffic and gRPC ingress; health probes come from the gateway too.
@@ -24,6 +25,15 @@ rules:
   # platform token and passes warden's per-secret check and audit.
   - id: ipam-bmc-secrets
     from: ["spiffe://example.org/svc/ipam"]
+    to: ["warden"]
+    operations: ["/warden.v1.Secrets/Get", "/warden.v1.Secrets/GetPassword"]
+    effect: allow
+  # signing reads the TSA credentials of administrator signing on behalf of the
+  # signed-in user (feature 027): metadata to validate the reference, the
+  # password right before the timestamp request. The call carries the user's
+  # platform token and passes warden's per-secret check and audit.
+  - id: signing-tsa-secrets
+    from: ["spiffe://example.org/svc/signing"]
     to: ["warden"]
     operations: ["/warden.v1.Secrets/Get", "/warden.v1.Secrets/GetPassword"]
     effect: allow

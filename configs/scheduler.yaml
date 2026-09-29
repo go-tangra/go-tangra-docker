@@ -26,6 +26,7 @@ discovery:
     lcm: ["lcm:9945"]
     ipam: ["ipam:9985"]
     notification: ["notification:9943"]
+    signing: ["signing:9915"]
 limits: { max_request_bytes: 33554432 }
 limits_scheduler: { max_payload_bytes: 65536, max_result_bytes: 65536, max_timeout_seconds: 3600, min_interval_seconds: 60, max_page_size: 100, max_backup_bytes: 33554432, max_tasks_per_tenant: 1000 }
 db:
