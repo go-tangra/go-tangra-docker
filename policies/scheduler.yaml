@@ -19,7 +19,7 @@ rules:
     operations: ["*"]
     effect: allow
   - id: modules-register
-    from: ["spiffe://example.org/svc/ipam", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/notification", "spiffe://example.org/svc/signing", "spiffe://example.org/svc/hr"]
+    from: ["spiffe://example.org/svc/ipam", "spiffe://example.org/svc/lcm", "spiffe://example.org/svc/notification", "spiffe://example.org/svc/signing", "spiffe://example.org/svc/hr", "spiffe://example.org/svc/asset"]
     to: ["scheduler"]
     operations: ["/scheduler.v1.Registration/RegisterTaskTypes", "/scheduler.v1.Registration/UnregisterTaskTypes"]
     effect: allow

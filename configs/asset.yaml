@@ -22,6 +22,8 @@ discovery:
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
     inventory: ["inventory:9975"]
+    paperless: ["paperless:9955"]
+    scheduler: ["scheduler:9905"]
 limits: { max_request_bytes: 33554432 }
 limits_asset: { max_request_bytes: 1048576, max_backup_bytes: 33554432 }
 db:
@@ -39,6 +41,13 @@ object_store:
   secret_key: paperless-dev-secret
   presign_ttl_seconds: 900
 inventory: { service: inventory }
+# Documents live in the paperless module (full-text search); the ones still in
+# the object store are moved there in the background (feature 030). Photos stay
+# in the object store.
+paperless: { enabled: true, service: paperless }
+# Registers asset:inventory-sync with the scheduler (policies/scheduler.yaml
+# modules-register, configs/scheduler.yaml discovery.static.asset).
+task_scheduler: { enabled: true, service: scheduler }
 scheduler: { interval_seconds: 300, warranty_soon_days: 30, license_soon_days: 30, insurance_soon_days: 30 }
 uploads: { max_size_bytes: 20971520 }
 events: { enabled: true }

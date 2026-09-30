@@ -13,3 +13,20 @@ rules:
     to: ["paperless"]
     operations: ["*"]
     effect: allow
+  - id: asset-documents
+    # asset keeps asset attachments as paperless documents under
+    # /Assets/<asset tag> (resolve-or-create the folders, then store/read/
+    # delete/search the documents it owns). Feature 030.
+    from: ["spiffe://example.org/svc/asset"]
+    to: ["paperless"]
+    operations: ["/paperless.v1.PaperlessDocumentService/Create",
+                 "/paperless.v1.PaperlessDocumentService/Get",
+                 "/paperless.v1.PaperlessDocumentService/Download",
+                 "/paperless.v1.PaperlessDocumentService/Delete",
+                 "/paperless.v1.PaperlessDocumentService/Search",
+                 "/paperless.v1.PaperlessDocumentService/List",
+                 "/paperless.v1.PaperlessCategoryService/Create",
+                 "/paperless.v1.PaperlessCategoryService/Get",
+                 "/paperless.v1.PaperlessCategoryService/List",
+                 "/paperless.v1.PaperlessCategoryService/GetTree"]
+    effect: allow

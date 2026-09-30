@@ -20,3 +20,9 @@ rules:
       "/asset.v1.SupplierService/ListSuppliers", "/asset.v1.LocationService/GetLocationTree", "/asset.v1.SystemService/Health",
       "/asset.v1.SystemService/GetDashboardStats", "/grpc.health.v1.Health/Check"]
     effect: allow
+  - id: scheduler-execute
+    # The platform scheduler runs asset:inventory-sync (feature 030).
+    from: ["spiffe://example.org/svc/scheduler"]
+    to: ["asset"]
+    operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
+    effect: allow
