@@ -1158,6 +1158,38 @@ inactive, cancels their open requests and re-routes approvals). Each tenant's HR
 administrator creates the tenant task `hr:carry-over` (suggested
 `30 0 1 1 *`; carries unused days into the next year).
 
+#### Asset documents in paperless, sync filters, scheduled sync (feature 030)
+
+Asset documents move into the paperless module (full-text search, filed under
+the paperless category `Assets/<asset tag>`), the inventory sync gets
+persisted filters (skip VMs/containers, stale/retired hosts, hostname and OS
+patterns) and the task type `asset:inventory-sync`. Roll out in this order:
+inventory (asset reads host reports), paperless (SDK + `asset-documents`
+rule), scheduler, then asset.
+
+```bash
+# 1. pin the feature-030 releases of inventory, paperless, scheduler and asset in .env
+# 2. copy the updated policies/ and run prod-init (regenerates prod/policies)
+./scripts/prod-init.sh
+# 3. prod/configs/asset.yaml (kept by prod-init): add under discovery.static
+#      paperless: ["paperless:9955"]
+#      scheduler: ["scheduler:9905"]
+#    and at top level
+#      paperless: { enabled: true, service: paperless }
+#      task_scheduler: { enabled: true, service: scheduler }
+#    prod/configs/scheduler.yaml, discovery.static:  asset: ["asset:9995"]
+# 4. recreate in order
+docker compose up -d inventory paperless scheduler asset
+```
+
+The asset module moves the documents still held in its object store into
+paperless a minute after start and then hourly (`documents migrated to
+paperless` in its log); photos stay in the object store. Paperless users see
+the asset documents through their access to the `Assets` category (tenant
+admins see everything). Create one `asset:inventory-sync` task per tenant in
+the scheduler UI (suggested `0 3 * * *`); set the filter first on the asset
+Inventory Sync page.
+
 #### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
 
 Permissions become module-scoped (`warden:secrets:read`) and every module
