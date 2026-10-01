@@ -30,6 +30,10 @@ valkey: { addresses: ["valkey:6379"], username: inventory, password: dev, allow_
 kek: { source: file, path: deploy/kek.dev }
 # Off-mesh ingest edge: endpoint agents post snapshots here (dev: plaintext).
 ingest: { addr: 0.0.0.0:9977, insecure: true }
+# Certificate delivery to agents for the deployer (feature 033, inventory
+# 4.7.0+). allow_plaintext_ingest only because the dev ingest edge is
+# plaintext; prod-init.sh switches it off (refused in production).
+cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: true }
 registry: { heartbeat_seconds: 30 }
 retention: { days: 90 }
 stale: { after_seconds: 86400 }

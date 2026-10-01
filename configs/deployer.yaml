@@ -21,6 +21,7 @@ discovery:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
+    inventory: ["inventory:9975"]
 limits: { max_request_bytes: 16842752 }
 limits_deployer: { backup_max_bytes: 16777216, config_max_bytes: 16384, filter_max_length: 256 }
 db:
@@ -32,3 +33,6 @@ jobs: { workers: 5, interval_seconds: 5, lease_seconds: 300, max_retries: 3, ret
 events: { enabled: true }
 gateway: { service: gateway, issuer: https://localhost:8443 }
 lcm: { service: lcm }
+# inventory-agent provider (feature 033, deployer 4.4.0+): deliveries go over
+# inventory.v1.CertificateDeliveryService on the mesh.
+inventory: { service: inventory }
