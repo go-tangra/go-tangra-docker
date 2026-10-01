@@ -63,7 +63,7 @@ limits_signing:
   max_image_bytes: 1048576
   max_field_upload_bytes: 5242880
   parse_timeout_seconds: 20
-  max_page_size: 100
+  max_page_size: 200
   max_backup_bytes: 2147483648
   signings_per_minute: 10
   qes_preparation_minutes: 10
