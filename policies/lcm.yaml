@@ -34,6 +34,14 @@ rules:
     to: ["lcm"]
     operations: ["/lcm.v1.Certificates/Download"]
     effect: allow
+  - id: inventory-download
+    # inventory relays certificates to its agents (feature 033): it fetches
+    # cert + chain (+ retained key) at the moment an agent pulls a delivery
+    # the deployer created; nothing is persisted by inventory.
+    from: ["spiffe://example.org/svc/inventory"]
+    to: ["lcm"]
+    operations: ["/lcm.v1.Certificates/Download"]
+    effect: allow
   - id: scheduler-execute
     # The scheduler (feature 026) runs lcm's registered task types; the
     # executor server re-checks that the verified peer is the scheduler.
