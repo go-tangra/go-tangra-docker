@@ -30,7 +30,7 @@ discovery:
     hr: ["hr:9925"]
     asset: ["asset:9995"]
 limits: { max_request_bytes: 33554432 }
-limits_scheduler: { max_payload_bytes: 65536, max_result_bytes: 65536, max_timeout_seconds: 3600, min_interval_seconds: 60, max_page_size: 100, max_backup_bytes: 33554432, max_tasks_per_tenant: 1000 }
+limits_scheduler: { max_payload_bytes: 65536, max_result_bytes: 65536, max_timeout_seconds: 3600, min_interval_seconds: 60, max_page_size: 200, max_backup_bytes: 33554432, max_tasks_per_tenant: 1000 }
 db:
   dsn: postgres://scheduler_app:dev@timescaledb:5432/scheduler?sslmode=disable
   migrate_dsn: postgres://postgres:dev@timescaledb:5432/scheduler?sslmode=disable

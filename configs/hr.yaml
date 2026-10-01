@@ -50,7 +50,7 @@ task_scheduler: { enabled: true, service: scheduler }
 # Base of the links in hr e-mails; prod-init.sh rewrites it to the public origin.
 links: { portal_base_url: https://localhost:8443 }
 limits_hr:
-  max_page_size: 100
+  max_page_size: 200
   max_calendar_days: 93
   max_request_days: 366
   max_import_bytes: 65536
