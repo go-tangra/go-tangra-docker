@@ -1212,6 +1212,77 @@ Custom roles created through the API must name permissions
 skipped ... role=member reason=role_missing` for the platform tenant is
 expected (that tenant has no `member` role).
 
+#### Server-side lists (feature 032)
+
+Every data table in the console now pages, sorts and totals on the server.
+Releases: portal 4.5.0 (its shell provides UI kit 4.3.0), scheduler 4.1.0,
+signing 4.2.0, ticket 4.3.0, hr 4.1.0, dns 4.3.0, paperless 4.4.0, deployer
+4.3.0, asset 4.4.0, inventory 4.6.0, ipam 4.10.0, lcm 4.5.0, notification
+4.8.0, warden 4.5.0, auth 4.6.0.
+
+**List contract** (browser API list endpoints, all modules):
+
+| | |
+|---|---|
+| Request | `page` (1-based, default 1), `page_size` (10, 25, 50, 100 or 200; default 25; max 200), `sort` (per-table allow-list), `order` (`asc` or `desc`) |
+| Response | `{"items": [...], "total": N, "page": P, "page_size": S, "sort": "...", "order": "..."}`; `total` counts what matches the filters **and** the caller's permissions |
+| Page beyond the last | answered with the last page (`page` in the response says which) |
+| Invalid parameter | `422 {"reason":"validation_failed","detail":{"param":"sort"}}`; auth answers `400` with the same body |
+| Browser state | the console keeps it in the URL: `?<table>.page`, `.size`, `.sort`, `.order`, so reload and copied links restore the view |
+
+- **Legacy `cursor`/`limit`** is still accepted for one release and answers
+  the old shape plus `total`. Mixing both styles is a 422 on `cursor`. auth's
+  roles, clients and sessions lists return a bare array while no list
+  parameter is sent (also one release). Scripts should move to `page` /
+  `page_size`; the legacy forms are removed in a later cleanup release.
+- **Audit and log tables default to the last 7 days** when `from`/`to` are
+  absent (portal gateway audit, lcm audit, notification log and audit, warden
+  audit, auth audit), also on the legacy path. Pass `from`/`to` for older
+  entries.
+- **Visibility is filtered in SQL** in lcm, notification and warden, so totals
+  are exact for users with partial grants.
+
+**Configuration: `max_page_size`.** The UI asks for up to 200 rows. Existing
+`prod/configs` are not rewritten by `prod-init.sh`; compare with `configs/`:
+
+| Module | Key in `prod/configs/<svc>.yaml` | Set to | If left at 100 |
+|---|---|---|---|
+| scheduler | `limits_scheduler.max_page_size` | 200 | silently caps pages at 100 |
+| signing | `limits_signing.max_page_size` | 200 | `422` when the UI asks for 200 |
+| hr | `limits_hr.max_page_size` | 200 (up to 500 is accepted) | fine, 100 only limits the largest page |
+| ticket, dns | `limits_ticket` / `limits_dns` `.max_page_size` | **leave at 100** | the value is unused for lists, but both refuse to start above 100 |
+
+**Database requirements.**
+
+- ipam sorts addresses and CIDRs with `pg_input_is_valid`: **PostgreSQL 16 or
+  later** (the default `timescale/timescaledb:latest-pg16` qualifies).
+- These migrations rewrite an audit hypertable under a table lock to add an
+  `id bigserial` column; duration grows with the audit volume. Roll the owner
+  out in a quiet window and expect that module's audit pages to wait:
+  portal `0004` (`gateway_audit_events`), lcm `0009` (`lcm_audit_events`),
+  auth `0012` (`auth_audit_events`).
+
+**Rollout checklist.**
+
+```sh
+# 0. back up (section 5) - migrations are forward-only
+# 1. .env: pin the releases above (portal 4.5.0 first), see .env.example
+# 2. prod/configs: max_page_size as in the table (scheduler, signing, hr)
+# 3. the shell first: the module UIs need kit 4.3.0, which only portal 4.5.0 provides
+docker compose pull gateway
+docker compose up -d gateway
+# 4. then the modules, in any order (auth, lcm and portal run the long migrations
+#    above on first start; watch: docker compose logs -f lcm auth)
+docker compose pull && docker compose up -d
+# 5. verify: a list answers the new shape, a bad sort is refused
+curl -s -H "Authorization: Bearer $TOKEN" "https://<PUBLIC_HOST>/api/<module>/v1/<list>?page=1&page_size=50" | jq '{total,page,page_size,sort,order}'
+curl -si -H "Authorization: Bearer $TOKEN" "https://<PUBLIC_HOST>/api/<module>/v1/<list>?sort=bogus" | head -1   # 422
+```
+
+Deploying a module with the new UI before portal 4.5.0 leaves its tables
+broken in the console (the old shell has no server-mode table); roll back the
+module or deploy the shell.
+
 ### Rollback
 
 Set the previous `TANGRA_VERSION`, restore the database backup taken before the
@@ -1322,6 +1393,8 @@ Valkey and job workers use database leases, but it is untested here).
 | ipam, lcm or notification exits: `config: ... field task_scheduler not found` (or `field notification not found` in lcm) | The config carries the feature-026 scheduler keys but the image predates them. Pin the feature-026 image (`IPAM_IMAGE` / `LCM_IMAGE` / `NOTIFICATION_IMAGE`) or remove the keys (section 7, "Scheduler"). |
 | signing exits: `config: ...` or cannot resolve signers / send mail / register tasks (`PermissionDenied`) | The callee images predate feature 027: pin the feature-027 releases of auth, notification, scheduler and warden and re-run `prod-init.sh` for the policies (section 7, "Signing"). |
 | hr exits: `config: ...` or cannot list people / send mail / start signing / register tasks (`PermissionDenied`) | The callee images predate feature 028: pin the feature-028 releases of auth, notification, signing and scheduler and re-run `prod-init.sh` for the policies (section 7, "HR"). |
+| A module's console table is empty or broken after an upgrade; API answers `422 validation_failed` on `page_size` | The module is newer than the portal shell (needs portal 4.5.0 / kit 4.3.0), or its `max_page_size` is below 200 (scheduler, signing; section 7, "Server-side lists"). |
+| Audit or log table shows nothing for old events | Audit and log lists default to the last 7 days; pass `from`/`to`. |
 | Disk full (`ENOSPC`) | Log rotation (section 2); `docker system df`; `docker image prune` after upgrades; RustFS and database growth; inventory keeps snapshots `retention.days` (90). |
 
 ---
