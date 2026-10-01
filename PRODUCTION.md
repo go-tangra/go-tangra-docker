@@ -1237,7 +1237,9 @@ signing 4.2.0, ticket 4.3.0, hr 4.1.0, dns 4.3.0, paperless 4.4.0, deployer
   `page_size`; the legacy forms are removed in a later cleanup release.
 - **Audit and log tables default to the last 7 days** when `from`/`to` are
   absent (portal gateway audit, lcm audit, notification log and audit, warden
-  audit, auth audit), also on the legacy path. Pass `from`/`to` for older
+  audit, auth audit). On the legacy `cursor`/`limit` path the window also
+  applies to notification and auth (and bounds warden's `total`); portal and
+  lcm legacy requests stay unbounded as before. Pass `from`/`to` for older
   entries.
 - **Visibility is filtered in SQL** in lcm, notification and warden, so totals
   are exact for users with partial grants.
