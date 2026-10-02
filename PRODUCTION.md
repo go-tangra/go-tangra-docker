@@ -1190,6 +1190,39 @@ admins see everything). Create one `asset:inventory-sync` task per tenant in
 the scheduler UI (suggested `0 3 * * *`); set the filter first on the asset
 Inventory Sync page.
 
+#### Certificates to inventory agents (feature 033)
+
+The deployer gets an `inventory-agent` provider: it asks inventory to deliver
+an lcm certificate to selected hosts, inventory pushes a reference to the
+agents and relays the certificate (and key) from lcm only when an agent pulls
+it over the TLS ingest edge. Roll out in this order: inventory 4.7.0 (agents
+then upgrade through "Upgrade all"), policies + lcm 4.6.2, deployer 4.4.0.
+
+```bash
+# 1. pin inventory 4.7.0 in .env; back up the inventory database (migration 0010)
+# 2. copy the updated policies/ (lcm: inventory-download, inventory:
+#    deployer-cert-delivery) and run prod-init (regenerates prod/policies)
+./scripts/prod-init.sh
+#    pin lcm 4.6.2 (Download without a stored key answers InvalidArgument,
+#    which inventory reports as key_unavailable) and reload its policy;
+#    renewer runs the same image and is recreated with it
+docker compose up -d lcm renewer
+# 3. prod/configs/inventory.yaml (kept by prod-init): add at top level
+#      cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }
+#    (discovery.static already names lcm)
+docker compose up -d inventory
+# 4. pin deployer 4.4.0; prod/configs/deployer.yaml: add under discovery.static
+#      inventory: ["inventory:9975"]
+#    and at top level
+#      inventory: { service: inventory }
+docker compose up -d deployer
+```
+
+`cert_delivery.allow_plaintext_ingest` must stay `false` in production
+(inventory refuses to start otherwise). Agents keep certificates in
+`/etc/inventory-agent/certs` (`live/<name>/fullchain.pem`, `privkey.pem`) and
+run a deploy hook only when one is configured locally in their `agent.yaml`.
+
 #### Module roles (auth 4.4.0, portal 4.3.0, modules 4.2.0+)
 
 Permissions become module-scoped (`warden:secrets:read`) and every module

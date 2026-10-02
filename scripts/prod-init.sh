@@ -236,6 +236,8 @@ else
   replace_line prod/configs/lcm.yaml '^acme:' 'acme: { allow_plaintext_dns: false }'
   # inventory ingest edge (agents): TLS with the public edge certificate.
   replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }'
+  # certificate delivery (feature 033): material only over the TLS ingest edge.
+  replace_line prod/configs/inventory.yaml '^cert_delivery:' 'cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }'
   f=prod/configs/ticket.yaml
   replace_line "$f" '^  host: mailpit$' "  host: ${SMTP_HOST}"
   replace_line "$f" '^  port: 1025$' "  port: ${SMTP_PORT}"
@@ -255,7 +257,7 @@ fi
 chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets/*
 
 # --- leftovers check ----------------------------------------------------------
-if grep -nE 'localhost:8443|localhost:8444|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|warden:9743' prod/configs/*.yaml; then
+if grep -nE 'localhost:8443|localhost:8444|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|allow_plaintext_ingest: true|warden:9743' prod/configs/*.yaml; then
   die "development values left in prod/configs (see above)"
 fi
 
