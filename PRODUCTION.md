@@ -1196,13 +1196,17 @@ The deployer gets an `inventory-agent` provider: it asks inventory to deliver
 an lcm certificate to selected hosts, inventory pushes a reference to the
 agents and relays the certificate (and key) from lcm only when an agent pulls
 it over the TLS ingest edge. Roll out in this order: inventory 4.7.0 (agents
-then upgrade through "Upgrade all"), policies, deployer 4.4.0.
+then upgrade through "Upgrade all"), policies + lcm 4.6.2, deployer 4.4.0.
 
 ```bash
 # 1. pin inventory 4.7.0 in .env; back up the inventory database (migration 0010)
 # 2. copy the updated policies/ (lcm: inventory-download, inventory:
 #    deployer-cert-delivery) and run prod-init (regenerates prod/policies)
 ./scripts/prod-init.sh
+#    pin lcm 4.6.2 (Download without a stored key answers InvalidArgument,
+#    which inventory reports as key_unavailable) and reload its policy;
+#    renewer runs the same image and is recreated with it
+docker compose up -d lcm renewer
 # 3. prod/configs/inventory.yaml (kept by prod-init): add at top level
 #      cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }
 #    (discovery.static already names lcm)
