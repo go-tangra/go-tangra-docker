@@ -113,6 +113,7 @@ if [ ! -s prod/credentials.env ]; then
     echo "RUSTFS_ACCESS_KEY=tangra$(rand 6)"
     echo "RUSTFS_SECRET_KEY=$(rand)"
     for s in $SERVICES; do echo "$(echo "$s" | tr a-z A-Z)_DB_PASSWORD=$(rand)"; done
+    for s in $SERVICES; do echo "VALKEY_PASSWORD_$(echo "$s" | tr a-z A-Z)=$(rand)"; done
   } > prod/credentials.env
   echo "generated prod/credentials.env"
 fi
@@ -123,6 +124,13 @@ for s in $SERVICES; do
   if ! grep -q "^${k}=" prod/credentials.env; then
     echo "${k}=$(rand)" >> prod/credentials.env
     echo "added ${k} to prod/credentials.env (create the role: PRODUCTION.md, Upgrades)"
+  fi
+  # One Valkey ACL user password per service (installs from before this shared
+  # VALKEY_PASSWORD; PRODUCTION.md, Upgrades).
+  k="VALKEY_PASSWORD_$(echo "$s" | tr a-z A-Z)"
+  if ! grep -q "^${k}=" prod/credentials.env; then
+    echo "${k}=$(rand)" >> prod/credentials.env
+    echo "added ${k} to prod/credentials.env (existing install: PRODUCTION.md, Upgrades, Valkey passwords)"
   fi
 done
 # shellcheck disable=SC1091
@@ -166,11 +174,12 @@ prod_config() {
   # (discovery: warden's gRPC listener is 9843 - configs/warden.yaml
   # server.grpc_addr - while configs/{ipam,ticket,dns}.yaml name 9743.)
   v="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  vk="VALKEY_PASSWORD_$(echo "$s" | tr a-z A-Z)"
   TLSQ='sslmode=verify-full\&sslrootcert=/tls/ca.crt'
   sed -i -E \
     -e "s#postgres://${s}_app:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://${s}_app:${!v}@timescaledb:5432/${s}?${TLSQ}#" \
     -e "s#postgres://postgres:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/${s}?${TLSQ}#" \
-    -e "s#password: dev, allow_plaintext: true \}#password: ${VALKEY_PASSWORD}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
+    -e "s#password: dev, allow_plaintext: true \}#password: ${!vk}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
     -e "s#, \"https://127.0.0.1:8443\"##" \
     -e "s#https://localhost:8443#${ORIGIN}#g" \
     -e "s#https://localhost:8444#${CONSOLE_ORIGIN}#g" \
@@ -292,6 +301,7 @@ set_env() { # <key> <value>
   fi
 }
 for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY; do set_env "$k" "${!k}"; done
+for s in $SERVICES; do k="VALKEY_PASSWORD_$(echo "$s" | tr a-z A-Z)"; set_env "$k" "${!k}"; done
 set_env PUBLIC_HOST "$PUBLIC_HOST"
 set_env PUBLIC_ORIGIN "$ORIGIN"
 set_env TRUST_DOMAIN "$TRUST_DOMAIN"
