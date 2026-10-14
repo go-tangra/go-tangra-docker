@@ -48,21 +48,21 @@ services:
       "--tls-cert-file", "/tls-server/server.crt", "--tls-key-file", "/tls-server/server.key",
       "--tls-ca-cert-file", "/tls/ca.crt", "--tls-auth-clients", "no",
       "--requirepass", "${VALKEY_PASSWORD:?set VALKEY_PASSWORD in .env}",
-      "--user", "gateway", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "auth", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "lcm", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "notification", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "warden", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "deployer", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "paperless", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "inventory", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "ipam", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "asset", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "ticket", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "hr", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+      "--user", "gateway", "on", ">${VALKEY_PASSWORD_GATEWAY:?set VALKEY_PASSWORD_GATEWAY in .env}", "~*", "&*", "+@all",
+      "--user", "auth", "on", ">${VALKEY_PASSWORD_AUTH:?set VALKEY_PASSWORD_AUTH in .env}", "~*", "&*", "+@all",
+      "--user", "lcm", "on", ">${VALKEY_PASSWORD_LCM:?set VALKEY_PASSWORD_LCM in .env}", "~*", "&*", "+@all",
+      "--user", "notification", "on", ">${VALKEY_PASSWORD_NOTIFICATION:?set VALKEY_PASSWORD_NOTIFICATION in .env}", "~*", "&*", "+@all",
+      "--user", "warden", "on", ">${VALKEY_PASSWORD_WARDEN:?set VALKEY_PASSWORD_WARDEN in .env}", "~*", "&*", "+@all",
+      "--user", "deployer", "on", ">${VALKEY_PASSWORD_DEPLOYER:?set VALKEY_PASSWORD_DEPLOYER in .env}", "~*", "&*", "+@all",
+      "--user", "paperless", "on", ">${VALKEY_PASSWORD_PAPERLESS:?set VALKEY_PASSWORD_PAPERLESS in .env}", "~*", "&*", "+@all",
+      "--user", "inventory", "on", ">${VALKEY_PASSWORD_INVENTORY:?set VALKEY_PASSWORD_INVENTORY in .env}", "~*", "&*", "+@all",
+      "--user", "ipam", "on", ">${VALKEY_PASSWORD_IPAM:?set VALKEY_PASSWORD_IPAM in .env}", "~*", "&*", "+@all",
+      "--user", "asset", "on", ">${VALKEY_PASSWORD_ASSET:?set VALKEY_PASSWORD_ASSET in .env}", "~*", "&*", "+@all",
+      "--user", "ticket", "on", ">${VALKEY_PASSWORD_TICKET:?set VALKEY_PASSWORD_TICKET in .env}", "~*", "&*", "+@all",
+      "--user", "dns", "on", ">${VALKEY_PASSWORD_DNS:?set VALKEY_PASSWORD_DNS in .env}", "~*", "&*", "+@all",
+      "--user", "scheduler", "on", ">${VALKEY_PASSWORD_SCHEDULER:?set VALKEY_PASSWORD_SCHEDULER in .env}", "~*", "&*", "+@all",
+      "--user", "signing", "on", ">${VALKEY_PASSWORD_SIGNING:?set VALKEY_PASSWORD_SIGNING in .env}", "~*", "&*", "+@all",
+      "--user", "hr", "on", ">${VALKEY_PASSWORD_HR:?set VALKEY_PASSWORD_HR in .env}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -95,8 +95,11 @@ services:
       RUSTFS_TLS_PATH: /tls-server
     volumes:
       - "./prod/tls/rustfs:/tls-server:ro"
+    # tini as PID 1 reaps orphaned probe processes: rustfs does not, and the busybox
+    # wget ssl_client helpers piled up as zombies until the pids limit broke exec.
+    init: true
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:9000/health"]
+      test: ["CMD", "curl", "-fsk", "--max-time", "2", "-o", "/dev/null", "https://127.0.0.1:9000/health"]
 
   tika:
     restart: unless-stopped

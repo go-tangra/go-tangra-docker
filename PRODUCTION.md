@@ -246,7 +246,7 @@ It creates `prod/` (git-ignored, mode 0700/0600):
 
 | Path | Content |
 |---|---|
-| `prod/credentials.env` | Generated `POSTGRES_PASSWORD`, `VALKEY_PASSWORD`, `OPENFGA_PRESHARED_KEY`, `RUSTFS_ACCESS_KEY`/`SECRET_KEY` and one password per database role. Generated **once**, never replaced. |
+| `prod/credentials.env` | Generated `POSTGRES_PASSWORD`, `VALKEY_PASSWORD` (Valkey default user), one `VALKEY_PASSWORD_<SERVICE>` per Valkey ACL user, `OPENFGA_PRESHARED_KEY`, `RUSTFS_ACCESS_KEY`/`SECRET_KEY` and one password per database role. Generated **once**, never replaced. |
 | `prod/keys/<svc>.kek` | Fresh key-encryption keys (section 4.3). Generated once, never replaced. |
 | `prod/init-db.sql` | `init-db.sql` with the generated role passwords. |
 | `prod/configs/<svc>.yaml` | Copies of `configs/` with the production settings below. Rewritten only with `FORCE=1`. |
@@ -1244,6 +1244,31 @@ Custom roles created through the API must name permissions
 `module:resource:action`. The auth log line `registration: built-in grant
 skipped ... role=member reason=role_missing` for the platform tenant is
 expected (that tenant has no `member` role).
+
+#### Valkey: one password per ACL user, rustfs probe
+
+Every Valkey ACL user (`gateway`, `auth`, `lcm` and each module) now has its
+own password, `VALKEY_PASSWORD_<SERVICE>` in `.env`; `VALKEY_PASSWORD` is only
+the default user's. A module joined from another host through the catalogue
+gets its own user's password, not one that opens every user. The template
+also gives rustfs `init: true` and a `curl` probe: rustfs does not reap
+children, so the busybox `wget` probe left zombie `ssl_client` processes
+until the pids limit made every `docker exec`, and with it the health check,
+fail (asset, paperless and ticket then refuse to start).
+
+`prod-init.sh` adds the new passwords to `prod/credentials.env` and `.env` but
+keeps `prod/configs`, so on an existing install:
+
+1. Back up `.env`, `docker-compose.override.yaml`, `prod/credentials.env` and
+   `prod/configs`.
+2. Run `scripts/prod-init.sh`.
+3. In each `prod/configs/<service>.yaml`, set `valkey.password` to that
+   service's `VALKEY_PASSWORD_<SERVICE>`.
+4. Take the `valkey` command and the `rustfs` block from
+   `docker-compose.production.yaml.example` into the override.
+5. Recreate Valkey and every service at once (single-file config mounts keep
+   the old file until the container is recreated, `renewer` included):
+   `docker compose up -d --force-recreate valkey renewer gateway auth lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr rustfs`.
 
 #### Server-side lists (feature 032)
 
