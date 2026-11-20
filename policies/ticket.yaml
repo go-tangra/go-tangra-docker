@@ -1,0 +1,25 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-ticket:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for ticket (helpdesk): the gateway forwards
+# browser traffic and probes health; the ticket.v1 gRPC surface (Create/Get/List/
+# AddComment) is called by other platform modules directly, acting for the tenant
+# named in each request (e.g. monitoring or asset alerts opening tickets). ticket
+# itself calls auth (keys, revocations, permission checks, the user directory for
+# assignable agents) and warden (relay token / SMTP password references) as a
+# client — those rules live in the callee's policy. The inbound mail edge
+# (POST /inbound/mail, :9957) is OFF the mesh and authenticated by the relay token,
+# so it is not governed by this file.
+version: ticket-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["ticket"]
+    operations: ["*"]
+    effect: allow
+  - id: modules-tickets
+    from: ["spiffe://example.org/svc/*"]
+    to: ["ticket"]
+    operations: ["/ticket.v1.Tickets/Create", "/ticket.v1.Tickets/Get", "/ticket.v1.Tickets/List",
+      "/ticket.v1.Tickets/AddComment", "/grpc.health.v1.Health/Check"]
+    effect: allow

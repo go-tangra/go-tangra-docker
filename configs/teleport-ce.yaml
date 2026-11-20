@@ -1,0 +1,19 @@
+# Single-node Teleport Community Edition for the dev stack (docker compose
+# --profile teleport-ce). Copy of deploy/teleport-ce.yaml in go-tangra-teleport.
+# Development only.
+version: v3
+teleport:
+  nodename: teleport-ce
+  data_dir: /var/lib/teleport
+  log: { output: stderr, severity: INFO }
+auth_service:
+  enabled: true
+  cluster_name: teleport-ce.local
+  listen_addr: 0.0.0.0:3025
+  proxy_listener_mode: multiplex
+proxy_service:
+  enabled: true
+  web_listen_addr: 0.0.0.0:3080
+  public_addr: teleport-ce:3080
+ssh_service:
+  enabled: true

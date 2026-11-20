@@ -1,0 +1,66 @@
+# slapd configuration (cn=config format) for the Freya test OpenLDAP image.
+# Loaded at image build time:
+#   slapadd -F /etc/openldap/slapd.d -n 0 -l bootstrap.ldif
+# where bootstrap.ldif is this file plus the schema entries generated from the
+# base image's /etc/openldap/schema/*.schema (see Dockerfile).
+#
+# Listeners are chosen at slapd start, not here: entrypoint.sh starts slapd
+# with  -h 'ldap:/// ldaps:///'  = plain LDAP on 389 (clients MUST issue
+# StartTLS before binding; TLS is configured below) and LDAPS on 636.
+
+dn: cn=config
+objectClass: olcGlobal
+cn: config
+olcLogLevel: stats
+olcPidFile: /run/openldap/slapd.pid
+olcArgsFile: /run/openldap/slapd.args
+# TLS material is mounted at container start, never baked into the image:
+#   $TLS_DIR/server.crt  server certificate (generated per test run)
+#   $TLS_DIR/server.key  private key
+# entrypoint.sh copies it to ldap-owned /run/openldap/tls/ first, so mounts
+# with root-only modes (e.g. compose secrets) work regardless of ownership.
+olcTLSCertificateFile: /run/openldap/tls/server.crt
+olcTLSCertificateKeyFile: /run/openldap/tls/server.key
+olcTLSVerifyClient: never
+
+dn: cn=module{0},cn=config
+objectClass: olcModuleList
+cn: module{0}
+olcModulePath: /usr/lib/openldap
+olcModuleLoad: back_mdb
+olcModuleLoad: memberof
+olcModuleLoad: refint
+
+dn: cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: schema
+
+dn: olcDatabase={1}mdb,cn=config
+objectClass: olcDatabaseConfig
+objectClass: olcMdbConfig
+olcDatabase: {1}mdb
+olcSuffix: dc=example,dc=test
+olcRootDN: cn=admin,dc=example,dc=test
+# SSHA hash of the throwaway test password "admin-password" (root DN is for
+# debugging only; tests bind as cn=reader from people.ldif).
+olcRootPW: {SSHA}zU/7I6aYf4MwmsgG0oZBmrS7sEh3JrC9
+olcDbDirectory: /var/lib/ldap
+olcDbMaxSize: 104857600
+olcDbIndex: objectClass eq
+olcDbIndex: uid eq
+olcDbIndex: mail eq
+olcAccess: {0}to attrs=userPassword by self write by anonymous auth by * none
+olcAccess: {1}to * by users read
+
+# Overlays exercised so the fixture behaves like a real-world directory.
+dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config
+objectClass: olcOverlayConfig
+objectClass: olcMemberOf
+olcOverlay: {0}memberof
+
+dn: olcOverlay={1}refint,olcDatabase={1}mdb,cn=config
+objectClass: olcOverlayConfig
+objectClass: olcRefintConfig
+olcOverlay: {1}refint
+olcRefintAttribute: member
+olcRefintNothing: cn=admin,dc=example,dc=test

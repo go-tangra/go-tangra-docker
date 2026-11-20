@@ -1,0 +1,13 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-deployer:4.1.0 (the policy built
+# into the image). prod-init.sh writes it to prod/policies/ with TRUST_DOMAIN in
+# place of example.org; the production overlay mounts that over the image's copy.
+# Freya service-to-service policy for the deployer: the gateway forwards browser
+# traffic and probes health; the deployer.v1 gRPC surface is called by other
+# modules directly (none yet). The deployer itself calls lcm/auth as a client.
+version: deployer-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["deployer"]
+    operations: ["*"]
+    effect: allow

@@ -1,0 +1,375 @@
+# Production overlay for docker-compose.yaml (go-tangra v4). See PRODUCTION.md.
+#
+#   cp docker-compose.production.yaml.example docker-compose.override.yaml
+#
+# docker compose merges docker-compose.override.yaml automatically. The overlay
+# needs Docker Compose >= 2.24.4 (it uses the !override / !reset merge tags).
+# It expects the git-ignored prod/ tree created by scripts/prod-init.sh and
+# scripts/gen-internal-tls.sh, the public edge certificate in prod/edge/, and
+# PUBLIC_HOST plus the credential variables in .env.
+#
+# What it changes compared with the development stack:
+#   * every service reads prod/configs/<svc>.yaml and its fresh key from
+#     prod/keys/ instead of configs/ and keys/ (bind mounts replace by target);
+#   * TimescaleDB, Valkey, OpenFGA, Vault and RustFS serve TLS with
+#     certificates from the internal CA (prod/tls); services verify them;
+#   * TimescaleDB and Vault keep their data in named volumes (pgdata, vault-data);
+#   * Vault runs as a real server (configs/vault/config.hcl, integrated
+#     storage) - initialise and unseal it by hand, see PRODUCTION.md;
+#   * Pebble and Mailpit are moved to the "dev" profile (never started);
+#   * dns loses the Docker socket (configs set docker.enabled: false);
+#   * long-running services restart automatically.
+
+x-tangra-tls: &tangra-tls "./prod/tls/ca:/tls:ro"
+x-tangra-env: &tangra-env
+  TZ: "${TZ:-UTC}"
+  # OS roots + internal CA: used by Go clients without a CA-file option
+  # (OpenFGA, S3 object store) and by the first-enroll HTTPS dial.
+  SSL_CERT_FILE: /tls/bundle.pem
+
+services:
+  # ---------------------------------------------------------------- infra
+  timescaledb:
+    restart: unless-stopped
+    command: ["postgres", "-c", "ssl=on",
+      "-c", "ssl_cert_file=/tls-server/server.crt", "-c", "ssl_key_file=/tls-server/server.key",
+      "-c", "ssl_min_protocol_version=TLSv1.2"]
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
+      - "./prod/init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro"
+      - "./prod/tls/timescaledb:/tls-server:ro"
+
+  valkey:
+    restart: unless-stopped
+    # Same ACL users as the development stack, TLS only (port 0 disables plaintext).
+    command: ["valkey-server", "--port", "0", "--tls-port", "6379",
+      "--tls-cert-file", "/tls-server/server.crt", "--tls-key-file", "/tls-server/server.key",
+      "--tls-ca-cert-file", "/tls/ca.crt", "--tls-auth-clients", "no",
+      "--requirepass", "${VALKEY_PASSWORD:?set VALKEY_PASSWORD in .env}",
+      "--user", "gateway", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "auth", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "lcm", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "notification", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "warden", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "deployer", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "paperless", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "inventory", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "ipam", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "asset", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "ticket", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "hr", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "teleport", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+    volumes:
+      - "./prod/tls/valkey:/tls-server:ro"
+      - *tangra-tls
+    healthcheck:
+      test: ["CMD", "valkey-cli", "--tls", "--cacert", "/tls/ca.crt", "-a", "${VALKEY_PASSWORD}", "--no-auth-warning", "ping"]
+
+  openfga-migrate:
+    environment:
+      OPENFGA_DATASTORE_URI: "postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/openfga?sslmode=verify-full&sslrootcert=/tls/ca.crt"
+    volumes: [*tangra-tls]
+
+  openfga:
+    restart: unless-stopped
+    environment:
+      OPENFGA_DATASTORE_URI: "postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/openfga?sslmode=verify-full&sslrootcert=/tls/ca.crt"
+      OPENFGA_AUTHN_PRESHARED_KEYS: "${OPENFGA_PRESHARED_KEY:?set OPENFGA_PRESHARED_KEY in .env}"
+      OPENFGA_HTTP_TLS_ENABLED: "true"
+      OPENFGA_HTTP_TLS_CERT: /tls-server/server.crt
+      OPENFGA_HTTP_TLS_KEY: /tls-server/server.key
+      OPENFGA_PLAYGROUND_ENABLED: "false"
+    volumes:
+      - "./prod/tls/openfga:/tls-server:ro"
+      - *tangra-tls
+
+  rustfs:
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}"
+      RUSTFS_TLS_PATH: /tls-server
+    volumes:
+      - "./prod/tls/rustfs:/tls-server:ro"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "--no-check-certificate", "https://127.0.0.1:9000/health"]
+
+  tika:
+    restart: unless-stopped
+  gotenberg:
+    restart: unless-stopped
+
+  # Real Vault server: persistent integrated storage, TLS listener. Healthy only
+  # when initialised AND unsealed (vault status exits 2 while sealed).
+  vault:
+    restart: unless-stopped
+    command: ["server"]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ""
+      VAULT_ADDR: "https://127.0.0.1:8200"
+      VAULT_CACERT: /tls/ca.crt
+    volumes:
+      - "vault-data:/vault/file"
+      - "./configs/vault/config.hcl:/vault/config/config.hcl:ro"
+      - "./prod/tls/vault:/tls-server:ro"
+      - *tangra-tls
+    healthcheck:
+      start_period: 15s
+
+  # Never initialises/unseals Vault and stores no token. Passes when warden's
+  # AppRole credentials exist; first time: VAULT_TOKEN=<admin token> docker compose run --rm vault-init
+  vault-init:
+    environment:
+      VAULT_ADDR: "https://vault:8200"
+      VAULT_CACERT: /tls/ca.crt
+      VAULT_TOKEN: "${VAULT_TOKEN:-}"
+    volumes:
+      - "./scripts/vault-init-prod.sh:/vault-init.sh:ro"
+      - *tangra-tls
+
+  # Development-only services: never started in production.
+  pebble-certs: { profiles: ["dev"] }
+  pebble: { profiles: ["dev"] }
+  mailpit: { profiles: ["dev"] }
+
+  # ---------------------------------------------------------------- lcm (CA)
+  lcm-bootstrap:
+    environment: *tangra-env
+    volumes: &lcm-volumes
+      - "./prod/keys/lcm.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/lcm.yaml:/app/deploy/container.yaml:ro"
+      - *tangra-tls
+  renewer:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes: *lcm-volumes
+  lcm:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes: !override
+      - "./prod/keys/lcm.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/lcm.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/lcm.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+    depends_on: !override
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      lcm-bootstrap: { condition: service_completed_successfully }
+
+  # ---------------------------------------------------------------- gateway
+  gateway-bootstrap:
+    # prod/configs/*.yaml are 0600 root (they hold database passwords); every
+    # service that reads them runs as root, like the other tangra containers.
+    user: "0:0"
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/gateway.yaml:/app/deploy/container.yaml:ro"
+      - *tangra-tls
+  # HTTP -> HTTPS: plain-HTTP requests on port 80 get a 301 to PUBLIC_ORIGIN
+  # (written to .env by prod-init.sh), keeping the path and query. The target is
+  # fixed, never taken from the Host header. Unprivileged nginx, read-only root.
+  http-redirect:
+    image: ${HTTP_REDIRECT_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}
+    restart: unless-stopped
+    ports: ["${HTTP_BIND:-}${HTTP_BIND:+:}${HTTP_PORT:-80}:8080"]
+    environment:
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env (prod-init.sh writes it)}"
+      NGINX_ENVSUBST_FILTER: "^PUBLIC_ORIGIN$"
+    volumes:
+      - "./configs/http-redirect:/etc/nginx/templates:ro"
+      - "./prod/acme:/acme:ro"
+    read_only: true
+    # nginx runs as uid 101; its writable scratch dirs must belong to it.
+    tmpfs: ["/tmp:uid=101,gid=101", "/var/cache/nginx:uid=101,gid=101", "/etc/nginx/conf.d:uid=101,gid=101"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  gateway:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/gateway.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/gateway.yaml:/app/deploy/policy.yaml:ro"
+      - "./prod/edge:/edge:ro"
+      - *tangra-tls
+    # Ports come from docker-compose.yaml: EDGE_PORT (-> 8443) and
+    # CONSOLE_PORT (-> 8444, the KVM console origin https://PUBLIC_HOST:8444,
+    # same certificate in prod/edge). Open CONSOLE_PORT in the firewall for
+    # administrators (PRODUCTION.md, Firewall).
+    # Workloads enroll at https://${PUBLIC_HOST}:8443 so the first-enroll dial
+    # verifies the public certificate; the alias resolves that name to the
+    # gateway inside the compose network.
+    networks:
+      default:
+        aliases: ["${PUBLIC_HOST:?set PUBLIC_HOST in .env}"]
+
+  # ---------------------------------------------------------------- auth
+  auth-bootstrap:
+    environment: *tangra-env
+    volumes: &auth-volumes
+      - "./prod/keys/auth.kek:/app/deploy/dev-kek.b64:ro"
+      - "./prod/configs/auth.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/auth.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  auth:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes: *auth-volumes
+  # Join-token jobs run the auth binary, which validates the auth config
+  # (including its key-encryption key) before minting.
+  gateway-token: { environment: *tangra-env, volumes: *auth-volumes }
+  notification-token: { environment: *tangra-env, volumes: *auth-volumes }
+  warden-token: { environment: *tangra-env, volumes: *auth-volumes }
+  deployer-token: { environment: *tangra-env, volumes: *auth-volumes }
+  paperless-token: { environment: *tangra-env, volumes: *auth-volumes }
+  inventory-token: { environment: *tangra-env, volumes: *auth-volumes }
+  ipam-token: { environment: *tangra-env, volumes: *auth-volumes }
+  asset-token: { environment: *tangra-env, volumes: *auth-volumes }
+  ticket-token: { environment: *tangra-env, volumes: *auth-volumes }
+  dns-token: { environment: *tangra-env, volumes: *auth-volumes }
+  scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
+  signing-token: { environment: *tangra-env, volumes: *auth-volumes }
+  hr-token: { environment: *tangra-env, volumes: *auth-volumes }
+  teleport-token: { environment: *tangra-env, volumes: *auth-volumes }
+
+  # ---------------------------------------------------------------- modules
+  notification:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/notification.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/notification.yaml:/app/deploy/container.yaml:ro"
+      # platform_email.password_file (the platform's outbound relay).
+      - "./prod/secrets/smtp.password:/run/secrets/smtp.password:ro"
+      - "./prod/policies/notification.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  warden:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/warden.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/warden.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  deployer:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/deployer.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/deployer.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/deployer.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  paperless:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/paperless.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/paperless.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/paperless.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  inventory:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/inventory.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/inventory.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/inventory.yaml:/app/deploy/policy.yaml:ro"
+      # Agent ingest edge certificate (ingest.tls_cert_file / tls_key_file).
+      - "./prod/edge:/edge:ro"
+      - *tangra-tls
+  ipam:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/ipam.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/ipam.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/ipam.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  asset:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/asset.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/asset.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/asset.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  ticket:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/ticket.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/ticket.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/ticket.yaml:/app/deploy/policy.yaml:ro"
+      - "./prod/secrets/ticket-smtp.password:/run/secrets/smtp.password:ro"
+      # Inbound mail edge certificate (inbound.tls_cert_file / tls_key_file).
+      - "./prod/edge:/edge:ro"
+      - *tangra-tls
+    depends_on: !override
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+      lcm: { condition: service_healthy }
+      lcm-bootstrap: { condition: service_completed_successfully }
+      ticket-token: { condition: service_completed_successfully }
+      ticket-secrets-init: { condition: service_completed_successfully }
+      rustfs: { condition: service_healthy }
+  dns:
+    restart: unless-stopped
+    environment: *tangra-env
+    # No Docker socket (configs/dns.yaml -> docker.enabled: false).
+    group_add: !reset []
+    volumes: !override
+      - "./prod/keys/dns.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/dns.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/dns.yaml:/app/deploy/policy.yaml:ro"
+      - "tokens:/tokens:ro"
+      - "dns-state:/state"
+      - "dns-secrets:/secrets:ro"
+      - "pdns-auth-conf:/pdns-auth-conf"
+      - "pdns-recursor-conf:/pdns-recursor-conf"
+      - *tangra-tls
+  # No KEK and no secret files: only its config, policy and the internal CA.
+  scheduler:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/scheduler.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/scheduler.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # The KEK seals the tenant CA, system/administrator keys and field values:
+  # back up prod/keys/signing.kek with the database. For the optional BISS
+  # origin proof (configs/signing.yaml qes), mount the certificate and key here.
+  signing:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/keys/signing.kek:/app/deploy/kek.dev:ro"
+      - "./prod/configs/signing.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/signing.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # No KEK and no object store: only its config, policy and the internal CA.
+  hr:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/hr.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/hr.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # No KEK and no object store. Cluster credentials stay file-backed under
+  # /state/credentials until warden can store them (PRODUCTION.md, "Known
+  # limitations"); back up the teleport-state volume.
+  teleport:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/teleport.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/teleport.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+
+volumes:
+  pgdata:
+  vault-data:

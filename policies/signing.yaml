@@ -1,0 +1,36 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-signing (the policy built
+# into the image; the feature-028 release adds `hr-module-api`, the module API
+# signing.v1.ModuleSubmissions called by hr). prod-init.sh writes it to
+# prod/policies/ with TRUST_DOMAIN in place of example.org; the production
+# overlay mounts that over the image's copy.
+# Freya service-to-service policy for the signing module
+# (contracts/mesh-policies.md). The gateway forwards browser traffic; only the
+# scheduler executes signing's task types (expire submissions, send reminders);
+# only the hr module calls the module API (signing.v1.ModuleSubmissions,
+# feature 028) for the leave documents it starts. Its own outbound calls (auth Profiles and
+# Authorization, notification Notifier/Send, warden on-behalf secret reads,
+# scheduler task-type registration, lcm enrolment) are allowed by the callees'
+# policies.
+version: signing-dev-1
+rules:
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["signing"]
+    operations: ["*"]
+    effect: allow
+  - id: scheduler-execute
+    from: ["spiffe://example.org/svc/scheduler"]
+    to: ["signing"]
+    operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
+    effect: allow
+  - id: hr-module-api
+    from: ["spiffe://example.org/svc/hr"]
+    to: ["signing"]
+    operations:
+      - "/signing.v1.ModuleSubmissions/ListTemplates"
+      - "/signing.v1.ModuleSubmissions/CreateAndSend"
+      - "/signing.v1.ModuleSubmissions/GetSubmission"
+      - "/signing.v1.ModuleSubmissions/Cancel"
+      - "/signing.v1.ModuleSubmissions/Delete"
+      - "/signing.v1.ModuleSubmissions/FinalDocument"
+    effect: allow

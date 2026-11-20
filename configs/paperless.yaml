@@ -1,0 +1,47 @@
+service_name: paperless
+trust_domain: example.org
+env: dev
+# paperless obtains its SVID by ENROLLING with lcm over the network (via the
+# gateway edge); app.Build injects the enroll provider, so identity is provided.
+identity:
+  provider: provided
+enroll:
+  enabled: true
+  enroll_url: https://gateway:8443/api/lcm/v1/enroll
+  lcm_grpc: lcm:9945
+  tenant_id: "00000000-0000-0000-0000-000000000001"
+  token_file: /tokens/paperless.token
+  state_file: /state/svid.json
+  insecure: true
+authz: { source: file, path: deploy/policy.yaml }
+server: { grpc_addr: 0.0.0.0:9955, http_addr: 0.0.0.0:9956 }
+admin: { addr: 127.0.0.1:9790 }
+discovery:
+  static:
+    gateway: ["gateway:9643"]
+    auth: ["auth:9543"]
+    lcm: ["lcm:9945"]
+limits: { max_request_bytes: 67158016 }
+limits_paperless: { backup_max_bytes: 33554432, search_max_len: 1024 }
+db:
+  dsn: postgres://paperless_app:dev@timescaledb:5432/paperless?sslmode=disable
+  migrate_dsn: postgres://postgres:dev@timescaledb:5432/paperless?sslmode=disable
+valkey: { addresses: ["valkey:6379"], username: paperless, password: dev, allow_plaintext: true }
+kek: { source: file, path: deploy/kek.dev }
+object_store:
+  endpoint: rustfs:9000
+  bucket: paperless
+  region: us-east-1
+  use_ssl: false
+  access_key: paperless
+  secret_key: paperless-dev-secret
+  presign_ttl_seconds: 900
+extract:
+  tika_url: http://tika:9998
+  gotenberg_url: http://gotenberg:3000
+  timeout_seconds: 120
+  max_bytes: 67108864
+uploads: { max_size_bytes: 67108864, allowed_mime: [] }
+jobs: { workers: 4, interval_seconds: 5, lease_seconds: 300, max_retries: 3, retry_delay_seconds: 30, backoff_multiplier: 2.0, job_timeout_seconds: 300, cleanup_days: 30 }
+events: { enabled: true }
+gateway: { service: gateway, issuer: https://localhost:8443 }

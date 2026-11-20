@@ -1,0 +1,23 @@
+# HTTP -> HTTPS redirect in front of the gateway edge (production overlay,
+# service http-redirect). The target is the configured public origin, never the
+# request's Host header, so the redirect cannot be pointed at another site.
+# ${PUBLIC_ORIGIN} is filled in by the nginx image's template step at start-up;
+# nginx's own $variables are left alone because they are not in the environment.
+server {
+    listen 8080 default_server;
+    listen [::]:8080 default_server;
+    server_name _;
+    server_tokens off;
+
+    # Let's Encrypt HTTP-01: certbot --webroot writes the challenge files to
+    # prod/acme on the host (mounted read-only at /acme).
+    location ^~ /.well-known/acme-challenge/ {
+        root /acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 ${PUBLIC_ORIGIN}$request_uri;
+    }
+}

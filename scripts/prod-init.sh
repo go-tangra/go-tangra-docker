@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+# Prepare the production files of a go-tangra v4 compose deployment
+# (see PRODUCTION.md, "Secrets and hardening"). Run from the repository root:
+#
+#   cp .env.example .env   # fill in the "prod-init.sh inputs" section
+#   ./scripts/prod-init.sh
+#
+# or pass the inputs on the command line (they override .env):
+#
+#   PUBLIC_HOST=tangra.example.com \
+#   SMTP_HOST=smtp.example.com SMTP_PORT=587 SMTP_USERNAME=tangra@example.com \
+#   SMTP_PASSWORD='...' MAIL_FROM=tangra@example.com \
+#   ./scripts/prod-init.sh
+#
+# It creates prod/ (git-ignored), which docker-compose.production.yaml.example
+# mounts instead of the development files:
+#
+#   prod/credentials.env   generated infrastructure + database passwords (0600)
+#   prod/keys/<svc>.kek    fresh 32-byte base64 key-encryption keys (0600)
+#   prod/init-db.sql       init-db.sql with one generated password per role
+#   prod/configs/<svc>.yaml  configs/<svc>.yaml with the production settings
+#   prod/policies/<svc>.yaml policies/<svc>.yaml for TRUST_DOMAIN (always rewritten)
+#   prod/secrets/smtp.password         SMTP password for notification's platform relay (may be empty)
+#   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
+#   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
+#
+# and writes the compose-level credentials, PUBLIC_HOST, PUBLIC_ORIGIN and
+# TRUST_DOMAIN into .env.
+#
+# Safe to re-run: credentials and KEKs are generated once and never replaced
+# (they must match the database and the sealed data). prod/configs is only
+# rewritten with FORCE=1 (that discards manual edits made there).
+#
+# Inputs (environment, else .env):
+#   PUBLIC_HOST     public DNS name of the edge (required)
+#   PUBLIC_PORT     public port browsers use (default 443; the origin then has no port)
+#   CONSOLE_PORT    public port of the KVM console origin (default 8444; the
+#                   gateway console listener, https://PUBLIC_HOST:CONSOLE_PORT)
+#   TRUST_DOMAIN    SPIFFE trust domain of the mesh, a domain you control, e.g.
+#                   infra.example.com (required; not example.org)
+#   SMTP_HOST       mail relay host (required)
+#   SMTP_PORT       465 (implicit TLS) or 587 (STARTTLS) (default 587)
+#   SMTP_USERNAME   relay user; empty = no SMTP authentication (IP-allow-listed relay)
+#   SMTP_PASSWORD   relay password (required with SMTP_USERNAME)
+#   MAIL_FROM       sender address of auth and warden mail, e.g. tangra@example.com (required)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+die() { echo "prod-init: $*" >&2; exit 1; }
+
+# Inputs may come from .env (see the "prod-init.sh inputs" section of
+# .env.example); a variable already set in the environment wins. .env is parsed,
+# not sourced, so its contents are never executed: KEY=VALUE lines only, with an
+# optional `export `, surrounding single or double quotes stripped, and
+# comments/blank lines ignored.
+INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
+if [ -f .env ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Z_][A-Z0-9_]*)=(.*)$ ]] || continue
+    key="${BASH_REMATCH[2]}" val="${BASH_REMATCH[3]}"
+    [[ " $INPUTS " == *" $key "* ]] || continue
+    [ -z "${!key+x}" ] || continue # already set in the environment
+    if [[ "$val" =~ ^\"(.*)\"$ || "$val" =~ ^\'(.*)\'$ ]]; then val="${BASH_REMATCH[1]}"; fi
+    [ -n "$val" ] || continue
+    printf -v "$key" '%s' "$val"
+    export "${key?}"
+  done < .env
+fi
+
+: "${PUBLIC_HOST:?set PUBLIC_HOST (public DNS name of the edge) in .env or the environment}"
+: "${TRUST_DOMAIN:?set TRUST_DOMAIN (SPIFFE trust domain, a domain you control, e.g. infra.example.com) in .env or the environment}"
+: "${SMTP_HOST:?set SMTP_HOST (the real mail relay) in .env or the environment}"
+: "${MAIL_FROM:?set MAIL_FROM (sender address, e.g. tangra@example.com) in .env or the environment}"
+PUBLIC_PORT="${PUBLIC_PORT:-443}"
+CONSOLE_PORT="${CONSOLE_PORT:-8444}"
+SMTP_PORT="${SMTP_PORT:-587}"
+SMTP_USERNAME="${SMTP_USERNAME:-}"
+SMTP_PASSWORD="${SMTP_PASSWORD:-}"
+case "$SMTP_PORT" in
+  465) SMTP_TLS=implicit ;;
+  587) SMTP_TLS=starttls ;;
+  *) die "SMTP_PORT must be 465 (implicit TLS) or 587 (STARTTLS): the platform relay (notification) and ticket require TLS" ;;
+esac
+[[ "$PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "PUBLIC_HOST must be a bare DNS name"
+[[ "$TRUST_DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "TRUST_DOMAIN must be a lowercase DNS name (no scheme, port or path)"
+[ "$TRUST_DOMAIN" != example.org ] || die "TRUST_DOMAIN: example.org is the development trust domain; use a domain you control"
+[[ "$SMTP_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "SMTP_HOST must be a bare host name"
+[[ "$MAIL_FROM" =~ ^[^@[:space:]]+@([A-Za-z0-9.-]+)$ ]] || die "MAIL_FROM must be an email address"
+MAIL_DOMAIN="${BASH_REMATCH[1]}"
+if [ -n "$SMTP_USERNAME" ] && [ -z "$SMTP_PASSWORD" ]; then die "SMTP_PASSWORD is required with SMTP_USERNAME"; fi
+if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="https://$PUBLIC_HOST:$PUBLIC_PORT"; fi
+[[ "$CONSOLE_PORT" =~ ^[0-9]{1,5}$ ]] || die "CONSOLE_PORT must be a port number"
+[ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
+if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
+
+SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr teleport"
+# scheduler, hr and teleport seal nothing: no KEK.
+KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns signing"
+
+umask 077
+mkdir -p prod/keys prod/configs prod/secrets prod/edge prod/acme
+chmod 0755 prod/acme   # served read-only by http-redirect (uid 101) for ACME HTTP-01
+
+# --- credentials (generated once) -------------------------------------------
+rand() { openssl rand -hex "${1:-24}"; }
+if [ ! -s prod/credentials.env ]; then
+  {
+    echo "# Generated by scripts/prod-init.sh on $(date -u +%FT%TZ). Keep secret; back it up."
+    echo "POSTGRES_PASSWORD=$(rand)"
+    echo "VALKEY_PASSWORD=$(rand)"
+    echo "OPENFGA_PRESHARED_KEY=$(rand)"
+    echo "RUSTFS_ACCESS_KEY=tangra$(rand 6)"
+    echo "RUSTFS_SECRET_KEY=$(rand)"
+    for s in $SERVICES; do echo "$(echo "$s" | tr a-z A-Z)_DB_PASSWORD=$(rand)"; done
+  } > prod/credentials.env
+  echo "generated prod/credentials.env"
+fi
+# Services added after the first run (e.g. scheduler) get their database
+# password appended; existing passwords are never replaced.
+for s in $SERVICES; do
+  k="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  if ! grep -q "^${k}=" prod/credentials.env; then
+    echo "${k}=$(rand)" >> prod/credentials.env
+    echo "added ${k} to prod/credentials.env (create the role: PRODUCTION.md, Upgrades)"
+  fi
+done
+# shellcheck disable=SC1091
+. prod/credentials.env
+
+# --- key-encryption keys (generated once, never replaced) -------------------
+for s in $KEK_SERVICES; do
+  if [ ! -s "prod/keys/$s.kek" ]; then
+    openssl rand -base64 32 > "prod/keys/$s.kek"
+    echo "generated prod/keys/$s.kek"
+  fi
+done
+
+# --- SMTP password files (notification platform_email, ticket) --------------
+printf '%s' "$SMTP_PASSWORD" > prod/secrets/smtp.password
+printf '%s' "$SMTP_PASSWORD" > prod/secrets/ticket-smtp.password
+
+# --- database roles ----------------------------------------------------------
+cp init-db.sql prod/init-db.sql.tmp
+for s in $SERVICES; do
+  v="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  sed -i -E "s/CREATE ROLE ${s}_app LOGIN PASSWORD 'dev'/CREATE ROLE ${s}_app LOGIN PASSWORD '${!v}'/" prod/init-db.sql.tmp
+done
+grep -q "PASSWORD 'dev'" prod/init-db.sql.tmp && die "init-db.sql still has a 'dev' password (unexpected role?)"
+mv prod/init-db.sql.tmp prod/init-db.sql
+chmod 0644 prod/init-db.sql   # read by the postgres user of the database container
+
+# --- service configurations -------------------------------------------------
+yq_str() { local v=${1//\'/\'\'}; printf "'%s'" "$v"; }   # YAML single-quoted scalar
+replace_line() { # <file> <awk regex> <replacement line(s)>
+  PAT="$2" REPL="$3" awk 'BEGIN{pat=ENVIRON["PAT"]; r=ENVIRON["REPL"]; n=0} $0 ~ pat {print r; n++; next} {print} END{if(n==0) exit 3}' "$1" > "$1.tmp" \
+    || die "$1: no line matches /$2/"
+  mv "$1.tmp" "$1"
+}
+
+# Generic production rewrite of configs/<svc>.yaml into prod/configs/<svc>.yaml
+# (TLS DSN, Valkey TLS, public origins, trust domain, verified enrollment).
+prod_config() {
+  local s="$1" f="prod/configs/$1.yaml" v
+  cp "configs/$s.yaml" "$f"
+  # (discovery: warden's gRPC listener is 9843 - configs/warden.yaml
+  # server.grpc_addr - while configs/{ipam,ticket,dns}.yaml name 9743.)
+  v="$(echo "$s" | tr a-z A-Z)_DB_PASSWORD"
+  TLSQ='sslmode=verify-full\&sslrootcert=/tls/ca.crt'
+  sed -i -E \
+    -e "s#postgres://${s}_app:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://${s}_app:${!v}@timescaledb:5432/${s}?${TLSQ}#" \
+    -e "s#postgres://postgres:dev@timescaledb:5432/${s}\?sslmode=disable#postgres://postgres:${POSTGRES_PASSWORD}@timescaledb:5432/${s}?${TLSQ}#" \
+    -e "s#password: dev, allow_plaintext: true \}#password: ${VALKEY_PASSWORD}, allow_plaintext: false, ca_file: /tls/ca.crt }#" \
+    -e "s#, \"https://127.0.0.1:8443\"##" \
+    -e "s#https://localhost:8443#${ORIGIN}#g" \
+    -e "s#https://localhost:8444#${CONSOLE_ORIGIN}#g" \
+    -e "s#use_ssl: false#use_ssl: true#" \
+    -e "s#access_key: paperless#access_key: ${RUSTFS_ACCESS_KEY}#" \
+    -e "s#secret_key: paperless-dev-secret#secret_key: ${RUSTFS_SECRET_KEY}#" \
+    -e 's#"warden:9743"#"warden:9843"#' \
+    -e "s#^trust_domain: example\.org\$#trust_domain: ${TRUST_DOMAIN}#" \
+    -e "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" \
+    "$f"
+  case "$s" in
+    ticket|dns|teleport)
+      # file: secret references are refused in production mode and warden
+      # references cannot be resolved unattended yet (PRODUCTION.md,
+      # "Known limitations"; teleport: warden has no write RPC for newly
+      # registered cluster credentials): these keep a non-production env label.
+      replace_line "$f" '^env: dev$' 'env: dev  # production mode refuses file: secret refs - see PRODUCTION.md "Known limitations"' ;;
+    *) replace_line "$f" '^env: dev$' 'env: production' ;;
+  esac
+  if [ "$s" = gateway ]; then
+    # The gateway enrolls directly at lcm's keyless listener; verify lcm's
+    # SVID with the mesh bundle (portal 4.2.0+ refuses insecure in production).
+    replace_line "$f" '^  insecure: true$' '  ca_file: /certs/ca.pem'
+  elif grep -q '^  enroll_url: https://gateway:8443/' "$f"; then
+    # Workloads enroll through the public edge name (a network alias of the
+    # gateway) so the first-enroll TLS dial verifies the public certificate.
+    sed -i -E -e "s#^  enroll_url: https://gateway:8443/#  enroll_url: https://${PUBLIC_HOST}:8443/#" \
+              -e "s#^  insecure: true\$#  insecure: false#" "$f"
+  fi
+}
+# Services whose production config needs more than prod_config (below).
+SPECIAL_CONFIGS="auth warden notification lcm inventory ticket dns"
+
+if [ -d prod/configs ] && [ -n "$(ls -A prod/configs)" ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "prod/configs exists; keeping it (FORCE=1 regenerates it from configs/ and discards manual edits)"
+  # A service added since the first run (e.g. scheduler) gets its config; the
+  # existing ones stay untouched (new keys there are added by hand, see
+  # PRODUCTION.md "Upgrades").
+  for s in $SERVICES; do
+    [ -e "prod/configs/$s.yaml" ] && continue
+    [[ " $SPECIAL_CONFIGS " == *" $s "* ]] && die "prod/configs/$s.yaml is missing; regenerate with FORCE=1 (discards manual edits) or restore it"
+    prod_config "$s"
+    echo "wrote prod/configs/$s.yaml (new service)"
+  done
+else
+  for s in $SERVICES; do prod_config "$s"; done
+  f=prod/configs/auth.yaml
+  replace_line "$f" '^openfga:' "openfga: { url: https://openfga:8080, preshared_key: ${OPENFGA_PRESHARED_KEY}, allow_plaintext: false }"
+  replace_line "$f" '^    allow_cidrs: \["172\.31\.250\.2/32"\]$' '    allow_cidrs: []'
+  f=prod/configs/warden.yaml
+  replace_line "$f" '^  address: http://vault:8200$' '  address: https://vault:8200'
+  replace_line "$f" '^  allow_plaintext: true$' $'  allow_plaintext: false\n  ca_file: /tls/ca.crt'
+  f=prod/configs/notification.yaml
+  replace_line "$f" '^smtp:' 'smtp: { allow_plaintext: false, dial_timeout_seconds: 30 }'
+  # The platform relay: auth and warden send through notification. The relay
+  # certificate must match SMTP_HOST (a host name, not an IP address).
+  if [ -n "$SMTP_USERNAME" ]; then
+    PLATFORM_AUTH=$'\n  username: '"$(yq_str "$SMTP_USERNAME")"$'\n  password_file: /run/secrets/smtp.password'
+  else
+    PLATFORM_AUTH=""
+  fi
+  sed -i -E '/^platform_email:/,/^[a-z_]+:/ { /^platform_email:/!{ /^  /d } }' "$f"
+  replace_line "$f" '^platform_email:$' "platform_email:"$'\n'"  host: ${SMTP_HOST}"$'\n'"  port: ${SMTP_PORT}"$'\n'"  tls: ${SMTP_TLS}${PLATFORM_AUTH}"$'\n'"  from: $(yq_str "$MAIL_FROM")"$'\n'"  allow_plaintext: false"
+  replace_line prod/configs/lcm.yaml '^acme:' 'acme: { allow_plaintext_dns: false }'
+  # inventory ingest edge (agents): TLS with the public edge certificate.
+  replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }'
+  # certificate delivery (feature 033): material only over the TLS ingest edge.
+  replace_line prod/configs/inventory.yaml '^cert_delivery:' 'cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }'
+  f=prod/configs/ticket.yaml
+  replace_line "$f" '^  host: mailpit$' "  host: ${SMTP_HOST}"
+  replace_line "$f" '^  port: 1025$' "  port: ${SMTP_PORT}"
+  replace_line "$f" '^  tls: none$' "  tls: ${SMTP_TLS}"
+  if [ -n "$SMTP_USERNAME" ]; then
+    replace_line "$f" '^  allow_plaintext: true$' $'  allow_plaintext: false\n  username: '"$(yq_str "$SMTP_USERNAME")"$'\n  password_ref: file:/run/secrets/smtp.password'
+  else
+    replace_line "$f" '^  allow_plaintext: true$' '  allow_plaintext: false'
+  fi
+  replace_line "$f" '^  mail_domain: example.org$' "  mail_domain: ${MAIL_DOMAIN}"
+  # dns: no Docker socket in production (configuration saves report
+  # restart_required; restart pdns-auth / pdns-recursor yourself).
+  sed -i -E '/^docker:/,/^[a-z_]+:/ s/^  enabled: true$/  enabled: false/' prod/configs/dns.yaml
+  grep -A1 '^docker:' prod/configs/dns.yaml | grep -q 'enabled: false' || die "dns.yaml: docker.enabled not switched off"
+  # teleport: no private Teleport proxy targets in production (the dev
+  # teleport-ce lab address); add a private range here only on purpose.
+  replace_line prod/configs/teleport.yaml '^  allowed_private_networks: \["172\.31\.251\.2/32"\]$' '  allowed_private_networks: []'
+  echo "wrote prod/configs/*.yaml"
+fi
+chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets/*
+
+# --- leftovers check ----------------------------------------------------------
+if grep -nE 'localhost:8443|localhost:8444|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|allow_plaintext_ingest: true|warden:9743' prod/configs/*.yaml; then
+  die "development values left in prod/configs (see above)"
+fi
+
+# --- service-to-service policies (regenerated every run) ----------------------
+# Each image carries deploy/policy.yaml naming spiffe://example.org/... callers;
+# the overlay mounts these TRUST_DOMAIN copies over them.
+mkdir -p prod/policies
+for s in $SERVICES; do
+  sed "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" "policies/$s.yaml" > "prod/policies/$s.yaml"
+done
+chmod 0644 prod/policies/*.yaml
+if grep -n 'example\.org' prod/policies/*.yaml | grep -v ':#'; then die "prod/policies still name example.org (see above)"; fi
+echo "wrote prod/policies/*.yaml (trust domain ${TRUST_DOMAIN})"
+
+# --- trust domain -------------------------------------------------------------
+# Kept configs (no FORCE=1) must already use TRUST_DOMAIN: a mixed mesh does
+# not start. PRODUCTION.md, "Trust domain", covers changing it on a running stack.
+bad=$(grep -LE "^trust_domain: ${TRUST_DOMAIN//./\\.}\$" prod/configs/*.yaml || true)
+[ -z "$bad" ] || die "trust_domain differs from TRUST_DOMAIN=${TRUST_DOMAIN} in: $(echo $bad) (PRODUCTION.md, \"Trust domain\")"
+if grep -n 'spiffe://' prod/configs/*.yaml | grep -v "spiffe://${TRUST_DOMAIN}/"; then
+  die "SPIFFE ids outside TRUST_DOMAIN=${TRUST_DOMAIN} in prod/configs (see above)"
+fi
+
+# --- .env ---------------------------------------------------------------------
+[ -f .env ] || cp .env.example .env
+set_env() { # <key> <value>
+  if grep -qE "^#?$1=" .env; then
+    K="$1" V="$2" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]; done=0} $0 ~ "^#?"k"=" && !done {print k"="v; done=1; next} {print}' .env > .env.tmp
+    mv .env.tmp .env
+  else
+    printf '%s=%s\n' "$1" "$2" >> .env
+  fi
+}
+for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_KEY RUSTFS_SECRET_KEY; do set_env "$k" "${!k}"; done
+set_env PUBLIC_HOST "$PUBLIC_HOST"
+set_env PUBLIC_ORIGIN "$ORIGIN"
+set_env TRUST_DOMAIN "$TRUST_DOMAIN"
+chmod 0600 .env
+echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN)"
+echo "next: put the public certificate in prod/edge/ (tls.crt, tls.key) and follow PRODUCTION.md"
