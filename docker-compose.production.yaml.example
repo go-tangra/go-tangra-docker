@@ -364,7 +364,11 @@ services:
   # limitations"); back up the teleport-state volume.
   teleport:
     restart: unless-stopped
-    environment: *tangra-env
+    environment:
+      <<: *tangra-env
+      # It is also on teleport-lab: advertise the service name, not whichever
+      # interface address comes first (the gateway cannot reach teleport-lab).
+      FREYA_ADVERTISE_HOST: teleport
     volumes:
       - "./prod/configs/teleport.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/teleport.yaml:/app/deploy/policy.yaml:ro"
