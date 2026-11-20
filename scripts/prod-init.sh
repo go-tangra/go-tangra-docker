@@ -266,6 +266,8 @@ else
   # cluster (teleport-cluster, 172.31.251.3 on teleport-lab), not the dev
   # teleport-ce lab address; add another private range only on purpose.
   replace_line prod/configs/teleport.yaml '^  allowed_private_networks: \["172\.31\.251\.2/32"\]$' '  allowed_private_networks: ["172.31.251.3/32"]'
+  # ...and its public port (the proxy port allow-list refuses others).
+  replace_line prod/configs/teleport.yaml '^  allowed_ports: \[443, 3080\]$' "  allowed_ports: [443, ${TELEPORT_PUBLIC_PORT}]"
   echo "wrote prod/configs/*.yaml"
 fi
 
