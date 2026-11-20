@@ -214,6 +214,7 @@ start-up. Taken from each service's `internal/config/config.go`:
 | scheduler | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
 | signing | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; `object_store.use_ssl: false` |
 | hr | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
+| teleport | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; **`secrets.allow_file` (file-backed cluster credentials) is refused** |
 
 The development configs trip these immediately; for example every service
 except the gateway stops with `config: db.dsn must use sslmode=verify-full (or
@@ -298,6 +299,9 @@ Changes it makes in `prod/configs/`:
   stays empty.
 - hr (no KEK, no object store) gets only the generic changes, its
   `links.portal_base_url` becoming the public origin.
+- teleport (no KEK, no object store) gets the generic changes, keeps `env: dev`
+  (see Known limitations) and loses the dev `teleport-ce` lab address in
+  `teleport.allowed_private_networks`.
 - `discovery.static.warden: ["warden:9843"]` for ipam/ticket/dns (the
   development configs name port 9743; warden listens on 9843,
   `configs/warden.yaml` `server.grpc_addr`).
@@ -1445,6 +1449,10 @@ Valkey and job workers use database leases, but it is untested here).
   hardened settings (TLS DSN, Valkey TLS, S3 TLS, SMTP TLS, inbound TLS); the
   secret files live in Docker volumes / `prod/secrets` (go-tangra-ticket T069,
   go-tangra-dns `deploy/README.md` "the warden gap").
+- **teleport cannot run with `env: production`** for the same reason:
+  newly registered cluster management identities are stored as files under
+  `/state/credentials` (warden has no write RPC). It runs with `env: dev` and
+  the hardened settings; back up the `teleport-state` volume.
 - **Inventory agent releases are not published for v4 yet**, so there are no
   agents to enroll today (the ingest edge serves TLS since inventory 4.1.0).
 - **`docker-compose.yaml.example`: the `*-token` jobs do not mount the auth

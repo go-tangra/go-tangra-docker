@@ -22,7 +22,7 @@ services:
   valkey:
     image: ${VALKEY_IMAGE:-valkey/valkey:8}
     environment: { TZ: "${TZ:-UTC}" }
-    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "scheduler", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "signing", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "hr", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD:-dev}", "--user", "gateway", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "auth", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "lcm", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "notification", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "warden", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "deployer", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "paperless", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "inventory", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ipam", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "asset", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "ticket", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "dns", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "scheduler", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "signing", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "hr", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all", "--user", "teleport", "on", ">${VALKEY_PASSWORD:-dev}", "~*", "&*", "+@all"]
     healthcheck: { test: ["CMD","valkey-cli","-a","${VALKEY_PASSWORD:-dev}","ping"], interval: 3s, timeout: 3s, retries: 40 }
   openfga-migrate:
     image: ${OPENFGA_IMAGE:-openfga/openfga:v1.20.0}
@@ -194,7 +194,8 @@ services:
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/dns=/api/dns;dns",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/scheduler=/api/scheduler;scheduler",
       "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/signing=/api/signing;signing",
-      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/hr=/api/hr;hr"]
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/hr=/api/hr;hr",
+      "-allow","spiffe://${TRUST_DOMAIN:-example.org}/svc/teleport=/api/teleport;teleport"]
     volumes: ["certs:/certs:ro","./configs/gateway.yaml:/app/deploy/container.yaml:ro"]
     restart: "no"
     depends_on:
@@ -838,12 +839,74 @@ services:
       hr-token: { condition: service_completed_successfully }
       signing: { condition: service_healthy }
 
+  # Mint teleport's single-use join token (enrolls via the gateway edge for its mesh SVID).
+  teleport-token:
+    image: ${AUTH_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-auth:${TANGRA_VERSION:-4.1.0}}
+    user: "0:0"
+    command: ["mint-enrollment-token","-config","deploy/container.yaml","-spiffe","spiffe://${TRUST_DOMAIN:-example.org}/svc/teleport","-ttl","30m","-out","/tokens/teleport.token"]
+    volumes: ["./keys/auth.kek:/app/deploy/dev-kek.b64:ro","tokens:/tokens","certs:/certs:ro","./configs/auth.yaml:/app/deploy/container.yaml:ro"]
+    restart: "no"
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      openfga: { condition: service_started }
+      auth-bootstrap: { condition: service_completed_successfully }
+
+  # teleport (feature 001-teleport-cluster-management): manages self-hosted
+  # Teleport Community Edition clusters - registration and health, resources,
+  # roles, users, locks, join tokens, audit, alerts, role-mapping provisioning
+  # and the deployment wizard. Browser API via the gateway (/api/teleport), UI
+  # remote at /m/teleport/. Mesh gRPC teleport.v1.Access for inventory, asset
+  # and portal (read-only host lookups and links). Calls each managed cluster's
+  # proxy through its SSRF guard. DEV: cluster credentials are file-backed under
+  # /state/credentials (configs/teleport.yaml secrets.allow_file); production
+  # stores warden references. No KEK, no object store, no host port. Its own
+  # release line: TELEPORT_IMAGE instead of TANGRA_VERSION.
+  teleport:
+    image: ${TELEPORT_IMAGE:-${IMAGE_REGISTRY:-ghcr.io/go-tangra}/go-tangra-teleport:sha-0d58296}
+    environment: { TZ: "${TZ:-UTC}" }
+    user: "0:0"
+    command: ["-config","deploy/container.yaml"]
+    networks: [default, teleport-lab]
+    volumes: ["tokens:/tokens:ro","teleport-state:/state","./configs/teleport.yaml:/app/deploy/container.yaml:ro"]
+    healthcheck: { test: ["CMD","wget","-qO-","http://127.0.0.1:9870/readyz"], interval: 5s, timeout: 3s, retries: 60, start_period: 10s }
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      valkey: { condition: service_healthy }
+      gateway: { condition: service_healthy }
+      lcm: { condition: service_healthy }
+      lcm-bootstrap: { condition: service_completed_successfully }
+      teleport-token: { condition: service_completed_successfully }
+
+  # --- Optional (docker compose --profile teleport-ce ...): a single-node
+  # Teleport Community Edition test cluster (configs/teleport-ce.yaml). It sits
+  # alone with the teleport module on the `teleport-lab` network at a fixed
+  # address - the only private target configs/teleport.yaml allow-lists
+  # (teleport.allowed_private_networks). Register it with proxy address
+  # teleport-ce:3080 and the identity file made as in README.md.
+  teleport-ce:
+    image: ${TELEPORT_CE_IMAGE:-public.ecr.aws/gravitational/teleport-distroless:18}
+    environment: { TZ: "${TZ:-UTC}" }
+    profiles: ["teleport-ce"]
+    entrypoint: ["teleport","start","-c","/etc/teleport/teleport.yaml"]
+    networks:
+      teleport-lab: { ipv4_address: 172.31.251.2 }
+    volumes: ["./configs/teleport-ce.yaml:/etc/teleport/teleport.yaml:ro","teleport-ce-data:/var/lib/teleport"]
+    ports: ["127.0.0.1:${TELEPORT_CE_PORT:-3080}:3080"]
+    restart: unless-stopped
+
 networks:
   # Fixed small subnet so configs/auth.yaml can allow-list exactly the openldap
   # address (directory.targets.allow_cidrs); created even without the profile.
   ldap:
     ipam:
       config: [{ subnet: 172.31.250.0/29 }]
+  # Fixed small subnet so configs/teleport.yaml can allow-list exactly the
+  # teleport-ce address (teleport.allowed_private_networks); created even
+  # without the profile.
+  teleport-lab:
+    ipam:
+      config: [{ subnet: 172.31.251.0/29 }]
 
 volumes:
   ldap-tls:
@@ -866,6 +929,8 @@ volumes:
   scheduler-state:
   signing-state:
   hr-state:
+  teleport-state:
+  teleport-ce-data:
   dns-secrets:
   pdns-auth-data:
   pdns-auth-conf:

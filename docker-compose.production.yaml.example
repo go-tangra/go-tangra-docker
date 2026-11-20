@@ -62,7 +62,8 @@ services:
       "--user", "dns", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "scheduler", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
       "--user", "signing", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
-      "--user", "hr", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
+      "--user", "hr", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all",
+      "--user", "teleport", "on", ">${VALKEY_PASSWORD}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -234,6 +235,7 @@ services:
   scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
   signing-token: { environment: *tangra-env, volumes: *auth-volumes }
   hr-token: { environment: *tangra-env, volumes: *auth-volumes }
+  teleport-token: { environment: *tangra-env, volumes: *auth-volumes }
 
   # ---------------------------------------------------------------- modules
   notification:
@@ -356,6 +358,16 @@ services:
     volumes:
       - "./prod/configs/hr.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/hr.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+  # No KEK and no object store. Cluster credentials stay file-backed under
+  # /state/credentials until warden can store them (PRODUCTION.md, "Known
+  # limitations"); back up the teleport-state volume.
+  teleport:
+    restart: unless-stopped
+    environment: *tangra-env
+    volumes:
+      - "./prod/configs/teleport.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/teleport.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
 
 volumes:

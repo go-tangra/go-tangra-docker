@@ -94,8 +94,8 @@ if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="
 [ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
 if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
 
-SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr"
-# scheduler and hr store no secrets: no KEK.
+SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr teleport"
+# scheduler, hr and teleport seal nothing: no KEK.
 KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns signing"
 
 umask 077
@@ -182,10 +182,11 @@ prod_config() {
     -e "s#spiffe://example\.org/#spiffe://${TRUST_DOMAIN}/#g" \
     "$f"
   case "$s" in
-    ticket|dns)
+    ticket|dns|teleport)
       # file: secret references are refused in production mode and warden
       # references cannot be resolved unattended yet (PRODUCTION.md,
-      # "Known limitations"): these two keep a non-production env label.
+      # "Known limitations"; teleport: warden has no write RPC for newly
+      # registered cluster credentials): these keep a non-production env label.
       replace_line "$f" '^env: dev$' 'env: dev  # production mode refuses file: secret refs - see PRODUCTION.md "Known limitations"' ;;
     *) replace_line "$f" '^env: dev$' 'env: production' ;;
   esac
@@ -252,6 +253,9 @@ else
   # restart_required; restart pdns-auth / pdns-recursor yourself).
   sed -i -E '/^docker:/,/^[a-z_]+:/ s/^  enabled: true$/  enabled: false/' prod/configs/dns.yaml
   grep -A1 '^docker:' prod/configs/dns.yaml | grep -q 'enabled: false' || die "dns.yaml: docker.enabled not switched off"
+  # teleport: no private Teleport proxy targets in production (the dev
+  # teleport-ce lab address); add a private range here only on purpose.
+  replace_line prod/configs/teleport.yaml '^  allowed_private_networks: \["172\.31\.251\.2/32"\]$' '  allowed_private_networks: []'
   echo "wrote prod/configs/*.yaml"
 fi
 chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets/*

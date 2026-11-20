@@ -37,3 +37,12 @@ rules:
     to: ["warden"]
     operations: ["/warden.v1.Secrets/Get", "/warden.v1.Secrets/GetPassword"]
     effect: allow
+  # teleport resolves the warden references of its managed clusters'
+  # management identities right before a cluster call (feature
+  # 001-teleport-cluster-management). Development stores file references
+  # instead (configs/teleport.yaml secrets.allow_file).
+  - id: teleport-secrets
+    from: ["spiffe://example.org/svc/teleport"]
+    to: ["warden"]
+    operations: ["/warden.v1.Secrets/Get", "/warden.v1.Secrets/GetPassword"]
+    effect: allow
