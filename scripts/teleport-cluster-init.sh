@@ -10,12 +10,12 @@
 # (configs/teleport/tangra-manager-role.yaml) and the tangra-mgmt user, and
 # writes a fresh management identity to prod/teleport-cluster/tangra-mgmt.identity
 # (root-owned, 0600). Register the cluster in the portal (Teleport > Register
-# cluster) with proxy address PUBLIC_HOST:TELEPORT_PUBLIC_PORT and that file;
+# cluster) with proxy address TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT and that file;
 # re-run the script before the identity expires and rotate it in the portal
 # (Credential > Rotate). PRODUCTION.md, "4.14 Teleport cluster".
 #
 # Inputs (environment, else .env):
-#   PUBLIC_HOST, TELEPORT_PUBLIC_PORT   as written by prod-init.sh
+#   TELEPORT_PUBLIC_HOST, TELEPORT_PUBLIC_PORT   as written by prod-init.sh
 #   TELEPORT_IDENTITY_TTL  lifetime of the management identity (default 2160h = 90 days)
 #   TELEPORT_ADMIN_USER    optional: also create this human administrator
 #                          (roles editor, access, auditor) and print its sign-up link
@@ -33,12 +33,12 @@ env_value() { # <key>: from the environment, else .env (parsed, never sourced)
   line="${line%\"}"; line="${line#\"}"; line="${line%\'}"; line="${line#\'}"
   printf '%s' "$line"
 }
-PUBLIC_HOST=$(env_value PUBLIC_HOST)
+TELEPORT_PUBLIC_HOST=$(env_value TELEPORT_PUBLIC_HOST)
 TELEPORT_PUBLIC_PORT=$(env_value TELEPORT_PUBLIC_PORT)
 TELEPORT_PUBLIC_PORT="${TELEPORT_PUBLIC_PORT:-3443}"
 TTL=$(env_value TELEPORT_IDENTITY_TTL); TTL="${TTL:-2160h}"
 ADMIN=$(env_value TELEPORT_ADMIN_USER)
-[ -n "$PUBLIC_HOST" ] || die "PUBLIC_HOST is not set (run scripts/prod-init.sh first)"
+[ -n "$TELEPORT_PUBLIC_HOST" ] || die "TELEPORT_PUBLIC_HOST is not set (run scripts/prod-init.sh first)"
 [ -s prod/teleport-cluster.yaml ] || die "prod/teleport-cluster.yaml is missing (run scripts/prod-init.sh)"
 [[ "$TTL" =~ ^[0-9]+h$ ]] || die "TELEPORT_IDENTITY_TTL must be hours, e.g. 2160h"
 if [ -n "$ADMIN" ] && ! [[ "$ADMIN" =~ ^[a-z][a-z0-9._-]{0,62}$ ]]; then
@@ -76,7 +76,7 @@ fi
 cat <<EOF
 
 Next, in the portal (Teleport > Register cluster):
-  proxy address  ${PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT}
+  proxy address  ${TELEPORT_PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT}
   identity file  prod/teleport-cluster/tangra-mgmt.identity  (sudo cat it to upload)
 Re-run this script before the identity expires and rotate the credential.
 EOF

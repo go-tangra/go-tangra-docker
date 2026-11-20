@@ -706,20 +706,24 @@ user's second factors and reset them (Users → user → Second factors).
 
 The overlay runs a single-node Teleport Community Edition cluster,
 `teleport-cluster`, that the teleport module manages: web UI, `tsh` and node
-joins at `https://PUBLIC_HOST:TELEPORT_PUBLIC_PORT` (default 3443; open it in
-the firewall). It uses the edge certificate in `prod/edge/` and re-reads it
-every hour, so certificate renewals need no restart. Its configuration,
-`prod/teleport-cluster.yaml`, is written by `prod-init.sh` on every run from
-`PUBLIC_HOST` and `TELEPORT_PUBLIC_PORT`:
+joins at `https://TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT` (default port
+3443; open it in the firewall). `TELEPORT_PUBLIC_HOST` is its own DNS name
+(for example `teleport.infra.example.com`, an A record to this host), never
+`PUBLIC_HOST`. It uses the edge certificate in `prod/edge/`, which must cover
+that name too (a wildcard does), and re-reads it every hour, so certificate
+renewals need no restart. Its configuration, `prod/teleport-cluster.yaml`, is
+written by `prod-init.sh` on every run from these inputs:
 
 - auth and proxy in one container, multiplexed on the one port;
-- cluster name `PUBLIC_HOST`;
+- cluster name `PUBLIC_HOST` (fixed once the cluster has started);
+- security keys (WebAuthn) bound to `TELEPORT_PUBLIC_HOST`;
 - local users with WebAuthn or an authenticator app as the second factor;
 - no SSH service on the cluster container itself.
 
-The module reaches the cluster by its public name. Inside the compose network
-that name is the gateway's alias, so the overlay pins it to the cluster's
-fixed address on the `teleport-lab` network (`extra_hosts`). That address,
+The module reaches the cluster by `TELEPORT_PUBLIC_HOST`, which the overlay
+pins to the cluster's fixed address on the `teleport-lab` network
+(`extra_hosts`). `PUBLIC_HOST` keeps resolving to the gateway, where the module
+enrolls; that is why the two names must differ. That address,
 `172.31.251.3/32`, is the only private target in
 `teleport.allowed_private_networks` of `prod/configs/teleport.yaml`. If
 `prod/configs` predates this release, `prod-init.sh` warns; set that line by
@@ -742,7 +746,7 @@ The script is idempotent. It:
    `editor`, `access`, `auditor`) and prints a sign-up link valid for one hour.
 
 Then register the cluster in the portal (**Teleport > Register cluster**): proxy
-address `PUBLIC_HOST:TELEPORT_PUBLIC_PORT`, and the identity file
+address `TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT`, and the identity file
 (`sudo cat prod/teleport-cluster/tangra-mgmt.identity`). The portal warns
 before the identity expires. Re-run the script then and rotate the
 credential (**Credential > Rotate**).

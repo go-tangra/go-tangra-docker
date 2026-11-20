@@ -45,8 +45,11 @@
 #   SMTP_USERNAME   relay user; empty = no SMTP authentication (IP-allow-listed relay)
 #   SMTP_PASSWORD   relay password (required with SMTP_USERNAME)
 #   MAIL_FROM       sender address of auth and warden mail, e.g. tangra@example.com (required)
+#   TELEPORT_PUBLIC_HOST  public DNS name of the Teleport cluster (required; not
+#                   PUBLIC_HOST, which inside the stack is the gateway). The edge
+#                   certificate must cover it, e.g. a wildcard *.infra.example.com
 #   TELEPORT_PUBLIC_PORT  public port of the Teleport cluster (default 3443;
-#                   https://PUBLIC_HOST:TELEPORT_PUBLIC_PORT, same certificate as the edge)
+#                   https://TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -57,7 +60,7 @@ die() { echo "prod-init: $*" >&2; exit 1; }
 # not sourced, so its contents are never executed: KEY=VALUE lines only, with an
 # optional `export `, surrounding single or double quotes stripped, and
 # comments/blank lines ignored.
-INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM TELEPORT_PUBLIC_PORT"
+INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM TELEPORT_PUBLIC_HOST TELEPORT_PUBLIC_PORT"
 if [ -f .env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
@@ -96,6 +99,11 @@ if [ -n "$SMTP_USERNAME" ] && [ -z "$SMTP_PASSWORD" ]; then die "SMTP_PASSWORD i
 if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="https://$PUBLIC_HOST:$PUBLIC_PORT"; fi
 [[ "$CONSOLE_PORT" =~ ^[0-9]{1,5}$ ]] || die "CONSOLE_PORT must be a port number"
 [ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
+: "${TELEPORT_PUBLIC_HOST:?set TELEPORT_PUBLIC_HOST (public DNS name of the Teleport cluster, e.g. teleport.infra.example.com) in .env or the environment}"
+[[ "$TELEPORT_PUBLIC_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "TELEPORT_PUBLIC_HOST must be a bare DNS name"
+# The module enrolls at PUBLIC_HOST (the gateway) and reaches the cluster by
+# its own name, pinned to the cluster inside the stack: the names must differ.
+[ "$TELEPORT_PUBLIC_HOST" != "$PUBLIC_HOST" ] || die "TELEPORT_PUBLIC_HOST must differ from PUBLIC_HOST"
 TELEPORT_PUBLIC_PORT="${TELEPORT_PUBLIC_PORT:-3443}"
 [[ "$TELEPORT_PUBLIC_PORT" =~ ^[0-9]{1,5}$ ]] || die "TELEPORT_PUBLIC_PORT must be a port number"
 for p in "$PUBLIC_PORT" "$CONSOLE_PORT" 8443; do
@@ -291,17 +299,17 @@ auth_service:
   authentication:
     type: local
     second_factors: [webauthn, otp]
-    webauthn: { rp_id: ${PUBLIC_HOST} }
+    webauthn: { rp_id: ${TELEPORT_PUBLIC_HOST} }
 proxy_service:
   enabled: true
   web_listen_addr: 0.0.0.0:3443
-  public_addr: ${PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT}
+  public_addr: ${TELEPORT_PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT}
   https_keypairs: [{ key_file: /edge/tls.key, cert_file: /edge/tls.crt }]
   https_keypairs_reload_interval: 1h
 ssh_service:
   enabled: false
 TELEPORT
-echo "wrote prod/teleport-cluster.yaml (https://${PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT})"
+echo "wrote prod/teleport-cluster.yaml (https://${TELEPORT_PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT})"
 if grep -q '^  allowed_private_networks: \[\]$' prod/configs/teleport.yaml; then
   echo "note: prod/configs/teleport.yaml allow-lists no private network; set" >&2
   echo '      allowed_private_networks: ["172.31.251.3/32"] for the Teleport cluster (PRODUCTION.md, 4.14)' >&2
@@ -350,7 +358,8 @@ for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_K
 set_env PUBLIC_HOST "$PUBLIC_HOST"
 set_env PUBLIC_ORIGIN "$ORIGIN"
 set_env TRUST_DOMAIN "$TRUST_DOMAIN"
+set_env TELEPORT_PUBLIC_HOST "$TELEPORT_PUBLIC_HOST"
 set_env TELEPORT_PUBLIC_PORT "$TELEPORT_PUBLIC_PORT"
 chmod 0600 .env
-echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN, TELEPORT_PUBLIC_PORT)"
+echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN, TELEPORT_PUBLIC_HOST, TELEPORT_PUBLIC_PORT)"
 echo "next: put the public certificate in prod/edge/ (tls.crt, tls.key) and follow PRODUCTION.md"

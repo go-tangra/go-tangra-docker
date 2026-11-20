@@ -369,16 +369,16 @@ services:
       - "./prod/configs/teleport.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/teleport.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
-    # The module reaches the production Teleport cluster by its public name
-    # (the certificate is for PUBLIC_HOST); inside the compose network that
-    # name is the gateway's alias, so pin it to the cluster's lab address -
-    # the one private target prod/configs/teleport.yaml allow-lists.
-    extra_hosts: ["${PUBLIC_HOST:?set PUBLIC_HOST in .env}:172.31.251.3"]
+    # The module reaches the production Teleport cluster by its own public
+    # name, pinned to the cluster's lab address - the one private target
+    # prod/configs/teleport.yaml allow-lists. PUBLIC_HOST stays the gateway
+    # (the module enrolls there).
+    extra_hosts: ["${TELEPORT_PUBLIC_HOST:?set TELEPORT_PUBLIC_HOST in .env}:172.31.251.3"]
 
   # ---------------------------------------------------------------- Teleport
   # The production Teleport Community Edition cluster the teleport module
   # manages (PRODUCTION.md, "4.14 Teleport cluster"): web UI, tsh and node
-  # joins at https://PUBLIC_HOST:TELEPORT_PUBLIC_PORT with the edge
+  # joins at https://TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT with the edge
   # certificate (reloaded hourly). Config: prod/teleport-cluster.yaml,
   # written by prod-init.sh. Bootstrap the management identity with
   # scripts/teleport-cluster-init.sh. Back up the teleport-cluster-data volume.
