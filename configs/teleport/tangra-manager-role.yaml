@@ -1,0 +1,28 @@
+# The least-privilege role the teleport module manages a cluster with.
+# Copy of docs/help/reference/tangra-manager-role.md in go-tangra-teleport;
+# scripts/teleport-cluster-init.sh creates it on the production cluster.
+kind: role
+version: v7
+metadata:
+  name: tangra-manager
+  description: Least-privilege identity the tangra platform manages this cluster with
+spec:
+  allow:
+    # Listing enrolled resources needs label access; no logins, database
+    # users, Kubernetes groups or desktop logins are granted, so the identity
+    # cannot open sessions to them.
+    node_labels: { '*': '*' }
+    app_labels: { '*': '*' }
+    db_labels: { '*': '*' }
+    kubernetes_labels: { '*': '*' }
+    windows_desktop_labels: { '*': '*' }
+    rules:
+      - resources: [user, role, lock, token]
+        verbs: [list, read, create, update, delete]
+      - resources: [node, app_server, db_server, kube_server, windows_desktop]
+        verbs: [list, read]
+      - resources: [event, session]
+        verbs: [list, read]
+      - resources: [cluster_auth_preference]
+        verbs: [read]
+  deny: {}

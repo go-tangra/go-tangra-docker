@@ -23,6 +23,8 @@
 #   prod/secrets/smtp.password         SMTP password for notification's platform relay (may be empty)
 #   prod/secrets/ticket-smtp.password  SMTP password for ticket (may be empty)
 #   prod/edge/             put the public edge certificate here (tls.crt/tls.key)
+#   prod/teleport-cluster.yaml          the production Teleport cluster (always rewritten)
+#   prod/teleport-cluster/ the management identity (scripts/teleport-cluster-init.sh)
 #
 # and writes the compose-level credentials, PUBLIC_HOST, PUBLIC_ORIGIN and
 # TRUST_DOMAIN into .env.
@@ -43,6 +45,8 @@
 #   SMTP_USERNAME   relay user; empty = no SMTP authentication (IP-allow-listed relay)
 #   SMTP_PASSWORD   relay password (required with SMTP_USERNAME)
 #   MAIL_FROM       sender address of auth and warden mail, e.g. tangra@example.com (required)
+#   TELEPORT_PUBLIC_PORT  public port of the Teleport cluster (default 3443;
+#                   https://PUBLIC_HOST:TELEPORT_PUBLIC_PORT, same certificate as the edge)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -53,7 +57,7 @@ die() { echo "prod-init: $*" >&2; exit 1; }
 # not sourced, so its contents are never executed: KEY=VALUE lines only, with an
 # optional `export `, surrounding single or double quotes stripped, and
 # comments/blank lines ignored.
-INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM"
+INPUTS="PUBLIC_HOST PUBLIC_PORT CONSOLE_PORT TRUST_DOMAIN SMTP_HOST SMTP_PORT SMTP_USERNAME SMTP_PASSWORD MAIL_FROM TELEPORT_PUBLIC_PORT"
 if [ -f .env ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
@@ -92,6 +96,11 @@ if [ -n "$SMTP_USERNAME" ] && [ -z "$SMTP_PASSWORD" ]; then die "SMTP_PASSWORD i
 if [ "$PUBLIC_PORT" = "443" ]; then ORIGIN="https://$PUBLIC_HOST"; else ORIGIN="https://$PUBLIC_HOST:$PUBLIC_PORT"; fi
 [[ "$CONSOLE_PORT" =~ ^[0-9]{1,5}$ ]] || die "CONSOLE_PORT must be a port number"
 [ "$CONSOLE_PORT" != "$PUBLIC_PORT" ] || die "CONSOLE_PORT must differ from PUBLIC_PORT (the console needs an origin of its own)"
+TELEPORT_PUBLIC_PORT="${TELEPORT_PUBLIC_PORT:-3443}"
+[[ "$TELEPORT_PUBLIC_PORT" =~ ^[0-9]{1,5}$ ]] || die "TELEPORT_PUBLIC_PORT must be a port number"
+for p in "$PUBLIC_PORT" "$CONSOLE_PORT" 8443; do
+  [ "$TELEPORT_PUBLIC_PORT" != "$p" ] || die "TELEPORT_PUBLIC_PORT must differ from the edge ports ($p is taken)"
+done
 if [ "$CONSOLE_PORT" = "443" ]; then CONSOLE_ORIGIN="https://$PUBLIC_HOST"; else CONSOLE_ORIGIN="https://$PUBLIC_HOST:$CONSOLE_PORT"; fi
 
 SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam asset ticket dns scheduler signing hr teleport"
@@ -99,7 +108,7 @@ SERVICES="auth gateway lcm notification warden deployer paperless inventory ipam
 KEK_SERVICES="auth lcm notification deployer paperless inventory ipam asset ticket dns signing"
 
 umask 077
-mkdir -p prod/keys prod/configs prod/secrets prod/edge prod/acme
+mkdir -p prod/keys prod/configs prod/secrets prod/edge prod/acme prod/teleport-cluster
 chmod 0755 prod/acme   # served read-only by http-redirect (uid 101) for ACME HTTP-01
 
 # --- credentials (generated once) -------------------------------------------
@@ -253,12 +262,52 @@ else
   # restart_required; restart pdns-auth / pdns-recursor yourself).
   sed -i -E '/^docker:/,/^[a-z_]+:/ s/^  enabled: true$/  enabled: false/' prod/configs/dns.yaml
   grep -A1 '^docker:' prod/configs/dns.yaml | grep -q 'enabled: false' || die "dns.yaml: docker.enabled not switched off"
-  # teleport: no private Teleport proxy targets in production (the dev
-  # teleport-ce lab address); add a private range here only on purpose.
-  replace_line prod/configs/teleport.yaml '^  allowed_private_networks: \["172\.31\.251\.2/32"\]$' '  allowed_private_networks: []'
+  # teleport: the only private Teleport proxy target is the production
+  # cluster (teleport-cluster, 172.31.251.3 on teleport-lab), not the dev
+  # teleport-ce lab address; add another private range only on purpose.
+  replace_line prod/configs/teleport.yaml '^  allowed_private_networks: \["172\.31\.251\.2/32"\]$' '  allowed_private_networks: ["172.31.251.3/32"]'
   echo "wrote prod/configs/*.yaml"
 fi
+
+# --- Teleport cluster (always rewritten: derived from the inputs only) -------
+# Single-node Teleport Community Edition (auth + proxy, multiplexed on one
+# port) that the teleport module manages. Local users with WebAuthn or OTP as
+# the second factor; no SSH service on the cluster container itself.
+cat > prod/teleport-cluster.yaml <<TELEPORT
+# Written by scripts/prod-init.sh - change the inputs and re-run, not this file.
+version: v3
+teleport:
+  nodename: teleport-cluster
+  data_dir: /var/lib/teleport
+  log: { output: stderr, severity: INFO }
+auth_service:
+  enabled: true
+  cluster_name: ${PUBLIC_HOST}
+  listen_addr: 0.0.0.0:3025
+  proxy_listener_mode: multiplex
+  proxy_protocol: "off"
+  authentication:
+    type: local
+    second_factors: [webauthn, otp]
+    webauthn: { rp_id: ${PUBLIC_HOST} }
+proxy_service:
+  enabled: true
+  web_listen_addr: 0.0.0.0:3443
+  public_addr: ${PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT}
+  https_keypairs: [{ key_file: /edge/tls.key, cert_file: /edge/tls.crt }]
+  https_keypairs_reload_interval: 1h
+ssh_service:
+  enabled: false
+TELEPORT
+echo "wrote prod/teleport-cluster.yaml (https://${PUBLIC_HOST}:${TELEPORT_PUBLIC_PORT})"
+if grep -q '^  allowed_private_networks: \[\]$' prod/configs/teleport.yaml; then
+  echo "note: prod/configs/teleport.yaml allow-lists no private network; set" >&2
+  echo '      allowed_private_networks: ["172.31.251.3/32"] for the Teleport cluster (PRODUCTION.md, 4.14)' >&2
+fi
+
 chmod 0600 prod/configs/*.yaml prod/keys/*.kek prod/credentials.env prod/secrets/*
+chmod 0644 prod/teleport-cluster.yaml   # no secrets; read by the cluster container
+chmod 0700 prod/teleport-cluster
 
 # --- leftovers check ----------------------------------------------------------
 if grep -nE 'localhost:8443|localhost:8444|sslmode=disable|:dev@|password: dev|dev-openfga-key|paperless-dev-secret|mailpit|allow_plaintext_dns: true|allow_plaintext_ingest: true|warden:9743' prod/configs/*.yaml; then
@@ -299,6 +348,7 @@ for k in POSTGRES_PASSWORD VALKEY_PASSWORD OPENFGA_PRESHARED_KEY RUSTFS_ACCESS_K
 set_env PUBLIC_HOST "$PUBLIC_HOST"
 set_env PUBLIC_ORIGIN "$ORIGIN"
 set_env TRUST_DOMAIN "$TRUST_DOMAIN"
+set_env TELEPORT_PUBLIC_PORT "$TELEPORT_PUBLIC_PORT"
 chmod 0600 .env
-echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN)"
+echo "updated .env (credentials, PUBLIC_HOST, PUBLIC_ORIGIN, TRUST_DOMAIN, TELEPORT_PUBLIC_PORT)"
 echo "next: put the public certificate in prod/edge/ (tls.crt, tls.key) and follow PRODUCTION.md"
