@@ -133,6 +133,7 @@ specific address) and, for source filtering, the `DOCKER-USER` chain.
 | 9957 ticket inbound mail edge | Only to your MTA's addresses, and only if you use ticket email intake | `TICKET_INBOUND_PORT`, `TICKET_INBOUND_BIND` |
 | 53 udp+tcp PowerDNS Authoritative | Only if pdns-auth serves public zones (and for Let's Encrypt DNS-01 via `freya-dns`) | `PDNS_AUTH_PORT=53`, `PDNS_AUTH_BIND=<public IP>` |
 | PowerDNS Recursor | **Never** publicly (open resolver). Keep `PDNS_RECURSOR_BIND=127.0.0.1` or an internal address | `PDNS_RECURSOR_*` |
+| 3443 -> teleport-cluster (Teleport web UI, `tsh`, node joins) | **Yes** to everyone who uses Teleport and to every host that joins it as a node | `TELEPORT_PUBLIC_PORT=3443` |
 | 9977 inventory ingest | Not until you put a TLS proxy in front (section 10). Keep `INVENTORY_INGEST_BIND=127.0.0.1` | `INVENTORY_INGEST_*` |
 | 25 | Not by this stack. Inbound mail is received by **your** MTA, which then posts to 9957 | - |
 | everything else | No. TimescaleDB, Valkey, OpenFGA, Vault, RustFS, Tika, Gotenberg, Prometheus and the PowerDNS HTTP APIs are not published | - |
@@ -214,6 +215,7 @@ start-up. Taken from each service's `internal/config/config.go`:
 | scheduler | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
 | signing | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; `object_store.use_ssl: false` |
 | hr | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure` |
+| teleport | db sslmode; `valkey.allow_plaintext`; `mesh_enroll.insecure`; **`secrets.allow_file` (file-backed cluster credentials) is refused** |
 
 The development configs trip these immediately; for example every service
 except the gateway stops with `config: db.dsn must use sslmode=verify-full (or
@@ -298,6 +300,9 @@ Changes it makes in `prod/configs/`:
   stays empty.
 - hr (no KEK, no object store) gets only the generic changes, its
   `links.portal_base_url` becoming the public origin.
+- teleport (no KEK, no object store) gets the generic changes, keeps `env: dev`
+  (see Known limitations) and loses the dev `teleport-ce` lab address in
+  `teleport.allowed_private_networks`.
 - `discovery.static.warden: ["warden:9843"]` for ipam/ticket/dns (the
   development configs name port 9743; warden listens on 9843,
   `configs/warden.yaml` `server.grpc_addr`).
@@ -697,6 +702,55 @@ ever changes, every user must register their keys again (the authenticator
 app and recovery codes keep working meanwhile). Administrators can view a
 user's second factors and reset them (Users → user → Second factors).
 
+### 4.14 Teleport cluster
+
+The overlay runs a single-node Teleport Community Edition cluster,
+`teleport-cluster`, that the teleport module manages: web UI, `tsh` and node
+joins at `https://TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT` (default port
+3443; open it in the firewall). `TELEPORT_PUBLIC_HOST` is its own DNS name
+(for example `teleport.infra.example.com`, an A record to this host), never
+`PUBLIC_HOST`. It uses the edge certificate in `prod/edge/`, which must cover
+that name too (a wildcard does), and re-reads it every hour, so certificate
+renewals need no restart. Its configuration, `prod/teleport-cluster.yaml`, is
+written by `prod-init.sh` on every run from these inputs:
+
+- auth and proxy in one container, multiplexed on the one port;
+- cluster name `PUBLIC_HOST` (fixed once the cluster has started);
+- security keys (WebAuthn) bound to `TELEPORT_PUBLIC_HOST`;
+- local users with WebAuthn or an authenticator app as the second factor;
+- no SSH service on the cluster container itself.
+
+The module reaches the cluster by `TELEPORT_PUBLIC_HOST`, which the overlay
+pins to the cluster's fixed address on the `teleport-lab` network
+(`extra_hosts`). `PUBLIC_HOST` keeps resolving to the gateway, where the module
+enrolls; that is why the two names must differ. That address,
+`172.31.251.3/32`, is the only private target in
+`teleport.allowed_private_networks` of `prod/configs/teleport.yaml`. If
+`prod/configs` predates this release, `prod-init.sh` warns; set that line by
+hand.
+
+Bootstrap it once the stack is up:
+
+```sh
+docker compose up -d teleport-cluster
+TELEPORT_ADMIN_USER=alice ./scripts/teleport-cluster-init.sh
+```
+
+The script is idempotent. It:
+
+1. creates the least-privilege `tangra-manager` role
+   (`configs/teleport/tangra-manager-role.yaml`) and the `tangra-mgmt` user;
+2. writes a management identity valid for `TELEPORT_IDENTITY_TTL` (default
+   90 days) to `prod/teleport-cluster/tangra-mgmt.identity` (root, 0600);
+3. with `TELEPORT_ADMIN_USER`, creates that human administrator (roles
+   `editor`, `access`, `auditor`) and prints a sign-up link valid for one hour.
+
+Then register the cluster in the portal (**Teleport > Register cluster**): proxy
+address `TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT`, and the identity file
+(`sudo cat prod/teleport-cluster/tangra-mgmt.identity`). The portal warns
+before the identity expires. Re-run the script then and rotate the
+credential (**Credential > Rotate**).
+
 ### 4.12 Trust domain
 
 Every workload identity is `spiffe://<TRUST_DOMAIN>/svc/<service>`, and lcm
@@ -791,6 +845,7 @@ Named volumes are `<COMPOSE_PROJECT_NAME>_<name>`.
 |---|---|---|
 | `pgdata` (overlay) | TimescaleDB: all 16 databases (`auth gateway lcm warden notification deployer paperless inventory ipam asset ticket dns scheduler signing hr openfga`), incl. the sealed mesh root CA | **everything** |
 | `vault-data` (overlay) | Vault storage (warden secrets) | all warden secrets |
+| `teleport-cluster-data` (overlay) | the production Teleport cluster: its CAs, users, roles, joined nodes and audit log | the Teleport cluster: every node must join again, users re-enrol |
 | `rustfs-data` | documents, asset photos, ticket attachments, signing templates and signed PDFs | all files |
 | `pdns-auth-data` | PowerDNS zone database (SQLite) | served zones |
 | `ticket-secrets`, `dns-secrets` | relay token, PowerDNS API keys | regenerable (reconfigure MTA / restart dns stack) |
@@ -1470,6 +1525,13 @@ Valkey and job workers use database leases, but it is untested here).
   hardened settings (TLS DSN, Valkey TLS, S3 TLS, SMTP TLS, inbound TLS); the
   secret files live in Docker volumes / `prod/secrets` (go-tangra-ticket T069,
   go-tangra-dns `deploy/README.md` "the warden gap").
+- **teleport cannot run with `env: production`** for the same reason:
+  newly registered cluster management identities are stored as files under
+  `/state/credentials` (warden has no write RPC). It runs with `env: dev` and
+  the hardened settings; back up the `teleport-state` volume. The
+  management identity of the production Teleport cluster (§4.14) is a
+  90-day file that you renew with `scripts/teleport-cluster-init.sh` and
+  rotate in the portal; there is no machine-identity (tbot) renewal yet.
 - **Inventory agent releases are not published for v4 yet**, so there are no
   agents to enroll today (the ingest edge serves TLS since inventory 4.1.0).
 - **`docker-compose.yaml.example`: the `*-token` jobs do not mount the auth

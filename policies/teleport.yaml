@@ -1,0 +1,38 @@
+# Copy of deploy/policy.yaml from ghcr.io/go-tangra/go-tangra-teleport (the
+# policy built into the image). prod-init.sh writes it to prod/policies/ with
+# TRUST_DOMAIN in place of example.org; the production overlay mounts that over
+# the image's copy.
+# Freya service-to-service policy for teleport (contracts/grpc.md). Deny by
+# default: only the rules below admit a caller. The gateway forwards browser
+# traffic and probes health; inventory, asset and portal may read Teleport
+# reachability (teleport.v1.Access, read-only); the scheduler alone may run
+# the module's periodic tasks (scheduler.v1.TaskExecutor). teleport itself
+# calls auth, warden, inventory, asset, notification and the scheduler
+# registrar as a client; those rules live in the callee's policy.
+version: teleport-dev-1
+rules:
+  # The gateway proxies only the browser HTTP API (the manifest declares no
+  # gRPC methods), so it is limited to HTTP operations ("METHOD /path") and
+  # can never reach teleport.v1 or the task executor.
+  - id: gateway-forwards
+    from: ["spiffe://example.org/svc/gateway"]
+    to: ["teleport"]
+    operations: ["GET *", "HEAD *", "POST *", "PUT *", "PATCH *", "DELETE *", "OPTIONS *"]
+    effect: allow
+  - id: modules-access
+    from: ["spiffe://example.org/svc/inventory", "spiffe://example.org/svc/asset", "spiffe://example.org/svc/portal"]
+    to: ["teleport"]
+    operations: ["/teleport.v1.Access/LookupHost", "/teleport.v1.Access/GetLinks", "/grpc.health.v1.Health/Check"]
+    effect: allow
+  - id: scheduler-tasks
+    from: ["spiffe://example.org/svc/scheduler"]
+    to: ["teleport"]
+    operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
+    effect: allow
+  - id: inventory-join-source
+    # inventory alone renders an enrollment's join material when the host's
+    # agent fetches it (teleport spec 002).
+    from: ["spiffe://example.org/svc/inventory"]
+    to: ["teleport"]
+    operations: ["/inventory.v1.TeleportJoinSource/RenderTeleportJoin"]
+    effect: allow

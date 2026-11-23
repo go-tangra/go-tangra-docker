@@ -29,7 +29,10 @@ history), `signing` (PDF templates and submissions signed with personal
 PIN-protected certificates or qualified cards via B-Trust BISS; per-tenant
 signing CA, verification, audit trails) and `hr` (leave management: leave types,
 allowances and carry-over, requests with manager approval, departments,
-holidays, team calendar; leave documents signed through `signing`).
+holidays, team calendar; leave documents signed through `signing`) and
+`teleport` (management of self-hosted Teleport Community Edition clusters:
+resources, roles, users, locks, join tokens, audit, alerts, role-mapping
+provisioning and a deployment wizard; optional `teleport-ce` test cluster).
 Each service's own repository (`go-tangra-<name>`, see `deploy/README.md` there)
 documents its configuration in depth.
 
@@ -104,7 +107,7 @@ TANGRA_VERSION=4.0.1 ./up.sh      # or set it in .env
 | `auth` (+ `auth-bootstrap`, `*-token` init jobs) | `go-tangra-auth` | `AUTH_IMAGE` |
 | `gateway` (+ `gateway-bootstrap`) | `go-tangra-portal` | `GATEWAY_IMAGE` |
 | `lcm` (+ `lcm-bootstrap`, `renewer`) | `go-tangra-lcm` | `LCM_IMAGE` |
-| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing`, `hr` | `go-tangra-<name>` | `<NAME>_IMAGE` |
+| `notification`, `warden`, `deployer`, `paperless`, `inventory`, `ipam`, `asset`, `ticket`, `dns`, `scheduler`, `signing`, `hr`, `teleport` | `go-tangra-<name>` | `<NAME>_IMAGE` |
 
 Third-party images are variables too (`TIMESCALEDB_IMAGE`, `VALKEY_IMAGE`, …;
 see `.env.example`). Each service image carries its own `deploy/` directory
@@ -424,6 +427,58 @@ GRANT CONNECT ON DATABASE hr TO hr_app;
 SQL
 docker compose up -d signing auth notification scheduler   # feature-028 images
 docker compose up -d valkey gateway-bootstrap hr-token hr
+```
+
+## Teleport (feature 001-teleport-cluster-management)
+
+`teleport` (gRPC 9925, HTTP 9926, admin 127.0.0.1:9870; no host port) enrolls
+like the other modules (`teleport-token`), is reached through the gateway under
+`/api/teleport` (allow-list entry in `gateway-bootstrap`) and shows its UI at
+`/m/teleport/`. It has its own release line: `TELEPORT_IMAGE` (no tagged
+release yet; the default is the first `main` image, `sha-0d58296`). It seals
+nothing (no KEK). Cluster management identities are stored as files under
+`/state/credentials` in the `teleport-state` volume (`secrets.allow_file`):
+warden has no write RPC yet.
+
+Its outbound calls need rules in the callees' policies (`policies/`): warden
+`teleport-secrets` (`Secrets/Get`, `GetPassword` for warden references),
+notification `modules-send` (alert and invite mail) and scheduler
+`modules-register` (plus `discovery.static.teleport` in
+`configs/scheduler.yaml`). inventory, asset and portal may call its
+`teleport.v1.Access` API (`policies/teleport.yaml`).
+
+The module refuses private, loopback and link-local proxy addresses except
+`teleport.allowed_private_networks` in `configs/teleport.yaml`; the dev config
+opens only the `teleport-ce` lab address. A test cluster:
+
+```sh
+docker compose --profile teleport-ce up -d teleport-ce
+# the tangra-manager role: the YAML block of docs/help/reference/tangra-manager-role.md
+# in go-tangra-teleport, saved as tangra-manager-role.yaml
+docker compose cp tangra-manager-role.yaml teleport-ce:/var/lib/teleport/
+docker compose exec teleport-ce tctl create -f /var/lib/teleport/tangra-manager-role.yaml
+docker compose exec teleport-ce tctl users add tangra-mgmt --roles=tangra-manager
+docker compose exec teleport-ce tctl auth sign --user=tangra-mgmt --format=file --ttl=720h --out=/var/lib/teleport/tangra-mgmt.identity
+docker compose cp teleport-ce:/var/lib/teleport/tangra-mgmt.identity .
+```
+
+Then register it in Teleport → Clusters with proxy address `teleport-ce:3080`
+and the identity file (delete the local copy afterwards). Its web UI is on
+`https://127.0.0.1:3080/` (`TELEPORT_CE_PORT`; self-signed certificate).
+
+An existing stack (TimescaleDB volume created before this change) does not re-run
+`init-db.sql`; create the database once:
+
+```sh
+docker compose exec -T timescaledb psql -U postgres <<'SQL'
+CREATE DATABASE teleport;
+\c teleport
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE teleport_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE teleport TO teleport_app;
+SQL
+docker compose up -d valkey gateway-bootstrap scheduler notification warden
+docker compose up -d teleport-token teleport
 ```
 
 ## DNS (dev)

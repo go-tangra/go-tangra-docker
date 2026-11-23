@@ -62,7 +62,8 @@ services:
       "--user", "dns", "on", ">${VALKEY_PASSWORD_DNS:?set VALKEY_PASSWORD_DNS in .env}", "~*", "&*", "+@all",
       "--user", "scheduler", "on", ">${VALKEY_PASSWORD_SCHEDULER:?set VALKEY_PASSWORD_SCHEDULER in .env}", "~*", "&*", "+@all",
       "--user", "signing", "on", ">${VALKEY_PASSWORD_SIGNING:?set VALKEY_PASSWORD_SIGNING in .env}", "~*", "&*", "+@all",
-      "--user", "hr", "on", ">${VALKEY_PASSWORD_HR:?set VALKEY_PASSWORD_HR in .env}", "~*", "&*", "+@all"]
+      "--user", "hr", "on", ">${VALKEY_PASSWORD_HR:?set VALKEY_PASSWORD_HR in .env}", "~*", "&*", "+@all",
+      "--user", "teleport", "on", ">${VALKEY_PASSWORD_TELEPORT:?set VALKEY_PASSWORD_TELEPORT in .env}", "~*", "&*", "+@all"]
     volumes:
       - "./prod/tls/valkey:/tls-server:ro"
       - *tangra-tls
@@ -237,6 +238,7 @@ services:
   scheduler-token: { environment: *tangra-env, volumes: *auth-volumes }
   signing-token: { environment: *tangra-env, volumes: *auth-volumes }
   hr-token: { environment: *tangra-env, volumes: *auth-volumes }
+  teleport-token: { environment: *tangra-env, volumes: *auth-volumes }
 
   # ---------------------------------------------------------------- modules
   notification:
@@ -360,7 +362,51 @@ services:
       - "./prod/configs/hr.yaml:/app/deploy/container.yaml:ro"
       - "./prod/policies/hr.yaml:/app/deploy/policy.yaml:ro"
       - *tangra-tls
+  # No KEK and no object store. Cluster credentials stay file-backed under
+  # /state/credentials until warden can store them (PRODUCTION.md, "Known
+  # limitations"); back up the teleport-state volume.
+  teleport:
+    restart: unless-stopped
+    environment:
+      <<: *tangra-env
+      # It is also on teleport-lab: advertise the service name, not whichever
+      # interface address comes first (the gateway cannot reach teleport-lab).
+      FREYA_ADVERTISE_HOST: teleport
+    volumes:
+      - "./prod/configs/teleport.yaml:/app/deploy/container.yaml:ro"
+      - "./prod/policies/teleport.yaml:/app/deploy/policy.yaml:ro"
+      - *tangra-tls
+    # The module reaches the production Teleport cluster by its own public
+    # name, pinned to the cluster's lab address - the one private target
+    # prod/configs/teleport.yaml allow-lists. PUBLIC_HOST stays the gateway
+    # (the module enrolls there).
+    extra_hosts: ["${TELEPORT_PUBLIC_HOST:?set TELEPORT_PUBLIC_HOST in .env}:172.31.251.3"]
+
+  # ---------------------------------------------------------------- Teleport
+  # The production Teleport Community Edition cluster the teleport module
+  # manages (PRODUCTION.md, "4.14 Teleport cluster"): web UI, tsh and node
+  # joins at https://TELEPORT_PUBLIC_HOST:TELEPORT_PUBLIC_PORT with the edge
+  # certificate (reloaded hourly). Config: prod/teleport-cluster.yaml,
+  # written by prod-init.sh. Bootstrap the management identity with
+  # scripts/teleport-cluster-init.sh. Back up the teleport-cluster-data volume.
+  teleport-cluster:
+    image: ${TELEPORT_CE_IMAGE:-public.ecr.aws/gravitational/teleport-distroless:18}
+    restart: unless-stopped
+    environment: { TZ: "${TZ:-UTC}" }
+    entrypoint: ["teleport","start","-c","/etc/teleport/teleport.yaml"]
+    ports: ["${TELEPORT_PUBLIC_PORT:-3443}:3443"]
+    networks:
+      default:
+      teleport-lab: { ipv4_address: 172.31.251.3 }
+    volumes:
+      - "./prod/teleport-cluster.yaml:/etc/teleport/teleport.yaml:ro"
+      - "./configs/teleport/tangra-manager-role.yaml:/etc/teleport/tangra-manager-role.yaml:ro"
+      - "./prod/edge:/edge:ro"
+      - "./prod/teleport-cluster:/out"
+      - "teleport-cluster-data:/var/lib/teleport"
+    healthcheck: { test: ["CMD","tctl","status"], interval: 10s, timeout: 5s, retries: 30, start_period: 20s }
 
 volumes:
   pgdata:
   vault-data:
+  teleport-cluster-data:

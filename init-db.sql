@@ -105,3 +105,9 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE ROLE hr_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
 GRANT CONNECT ON DATABASE hr TO hr_app;
 \c postgres
+CREATE DATABASE teleport;
+\c teleport
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE ROLE teleport_app LOGIN PASSWORD 'dev' NOBYPASSRLS;
+GRANT CONNECT ON DATABASE teleport TO teleport_app;
+\c postgres
