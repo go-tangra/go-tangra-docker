@@ -49,3 +49,11 @@ rules:
                  "/inventory.v1.CertificateDeliveryService/MarkCertificateRevoked",
                  "/grpc.health.v1.Health/Check"]
     effect: allow
+  - id: teleport-join
+    # the teleport module requests and reads SSH-node joins (feature 038);
+    # references only. The handler additionally checks teleport_join.sources.
+    from: ["spiffe://example.org/svc/teleport"]
+    to: ["inventory"]
+    operations: ["/inventory.v1.TeleportJoinDeliveryService/*",
+                 "/grpc.health.v1.Health/Check"]
+    effect: allow

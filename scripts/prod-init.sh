@@ -256,6 +256,7 @@ else
   replace_line prod/configs/inventory.yaml '^ingest:' 'ingest: { addr: 0.0.0.0:9977, insecure: false, tls_cert_file: /edge/tls.crt, tls_key_file: /edge/tls.key }'
   # certificate delivery (feature 033): material only over the TLS ingest edge.
   replace_line prod/configs/inventory.yaml '^cert_delivery:' 'cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: false }'
+  replace_line prod/configs/inventory.yaml '^teleport_join:' 'teleport_join: { enabled: true, sources: [teleport], source_service: teleport, report_timeout_minutes: 30, max_concurrent_fetches: 20, source_timeout_seconds: 10, allow_plaintext_ingest: false }'
   f=prod/configs/ticket.yaml
   replace_line "$f" '^  host: mailpit$' "  host: ${SMTP_HOST}"
   replace_line "$f" '^  port: 1025$' "  port: ${SMTP_PORT}"

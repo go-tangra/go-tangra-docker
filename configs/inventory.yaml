@@ -21,6 +21,7 @@ discovery:
     gateway: ["gateway:9643"]
     auth: ["auth:9543"]
     lcm: ["lcm:9945"]
+    teleport: ["teleport:9925"]
 limits: { max_request_bytes: 16842752 }
 limits_inventory: { max_request_bytes: 16842752, max_snapshot_bytes: 16777216 }
 db:
@@ -34,6 +35,9 @@ ingest: { addr: 0.0.0.0:9977, insecure: true }
 # 4.7.0+). allow_plaintext_ingest only because the dev ingest edge is
 # plaintext; prod-init.sh switches it off (refused in production).
 cert_delivery: { enabled: true, sources: [deployer], lcm_service: lcm, allow_plaintext_ingest: true }
+# teleport module SSH-node enrollment through the agents (inventory feature
+# 038, teleport spec 002); needs inventory 4.13 or later.
+teleport_join: { enabled: true, sources: [teleport], source_service: teleport, report_timeout_minutes: 30, max_concurrent_fetches: 20, source_timeout_seconds: 10, allow_plaintext_ingest: true }
 registry: { heartbeat_seconds: 30 }
 retention: { days: 90 }
 stale: { after_seconds: 86400 }

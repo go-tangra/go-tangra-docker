@@ -29,3 +29,10 @@ rules:
     to: ["teleport"]
     operations: ["/scheduler.v1.TaskExecutor/ExecuteTask"]
     effect: allow
+  - id: inventory-join-source
+    # inventory alone renders an enrollment's join material when the host's
+    # agent fetches it (teleport spec 002).
+    from: ["spiffe://example.org/svc/inventory"]
+    to: ["teleport"]
+    operations: ["/inventory.v1.TeleportJoinSource/RenderTeleportJoin"]
+    effect: allow

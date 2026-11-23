@@ -29,6 +29,7 @@ discovery:
     warden: ["warden:9843"]
     scheduler: ["scheduler:9905"]
     notification: ["notification:9943"]
+    inventory: ["inventory:9975"]
 db:
   dsn: postgres://teleport_app:dev@timescaledb:5432/teleport?sslmode=disable
   migrate_dsn: postgres://postgres:dev@timescaledb:5432/teleport?sslmode=disable
